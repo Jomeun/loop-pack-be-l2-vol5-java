@@ -26,5 +26,10 @@ class ArchitectureTest {
         noClasses().that().resideInAPackage("..interfaces..")
                 .should().dependOnClassesThat().resideInAPackage("..infrastructure..")
                 .check(classes);
+
+        noClasses().that().resideInAPackage("..infrastructure..")
+                .should().dependOnClassesThat()
+                .resideInAnyPackage("..interfaces..", "..application..")
+                .check(classes);
     }
 }
