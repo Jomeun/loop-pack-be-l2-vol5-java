@@ -84,35 +84,75 @@ feature-first는 한 기능과 관련된 코드를 가까운 위치에 모을 �
 
 현재 시스템의 기능 경계와 프로젝트 규모를 고려해, 기능별 격리보다 계층별 책임과 의존 방향을 명확히 드러내는 layer-first 구조를 선택한다. 이 선택으로 하나의 기능을 변경할 때 여러 계층의 패키지를 오가야 하는 비용이 발생한다.
 
-### 2.2 레이어별 역할
+### 2.2 레이어별 역할과 주요 구성 요소
 
-|계층|역할|
-|---|---|
-|interfaces|고객·관리자의 요청을 받아 응답으로 변환하고, 예외를 HTTP 오류로 매핑한다.|
-|application|domain의 행동·저장 약속을 이용해 유스케이스를 조율한다. 여러 도메인을 함께 변경하는 유스케이스(예: 주문 확정)의 트랜잭션 경계를 가진다.|
-|domain|상태와 업무 규칙을 표현하고, 필요한 저장소 인터페이스(약속)를 선언한다. 단일 도메인만 변경하는 유스케이스는 자체적으로 트랜잭션 경계를 가진다.|
-|infrastructure|domain이 선언한 저장소 인터페이스를 JPA 등 구체 기술로 구현한다.|
-|support|공통 오류 처리 등 애플리케이션 전반의 지원 코드를 제공한다. 모든 계층이 자유롭게 참조하는 완전히 독립적인 계층은 아니며, 하위 패키지의 역할에 따라 참조 범위가 정해진다.|
+각 레이어의 책임과 해당 레이어에 배치하는 주요 구성 요소는 다음과 같다. application 계층에서 유스케이스를 조율하는 Application Service는 `Facade`로 명명한다.
+
+|계층|역할|주요 구성 요소|
+|---|---|---|
+|interfaces|고객·관리자의 요청을 입력으로 변환하고, 처리 결과와 예외를 HTTP 응답으로 변환한다.|고객·관리자 Controller, 요청·응답 DTO, API 명세, 예외 응답 처리|
+|application|여러 도메인이 협력하는 유스케이스의 처리 순서와 트랜잭션 경계를 조율하고 결과를 구성한다. Facade는 Repository 인터페이스로 필요한 객체를 조회하고 Entity 또는 Domain Service의 행동을 호출하며, 업무 규칙을 직접 구현하지 않는다.|Facade, 입력·결과 모델|
+|domain|Entity와 Value Object는 상태와 업무 규칙을 표현하고 스스로 유효성을 지킨다. Domain Service는 단일 도메인의 조회와 행동, 하나의 Entity에 속하기 어려운 업무 판단을 담당하며, 자신이 처리하는 단일 도메인 유스케이스의 트랜잭션 경계를 가진다. 필요한 저장소 인터페이스도 domain에 선언한다.|Entity, Value Object, Domain Service, Repository 인터페이스|
+|infrastructure|domain이 선언한 저장소 인터페이스를 JPA 등 구체적인 저장 기술로 구현한다.|Repository 구현체, Spring Data JPA Repository|
+|support|공통 오류 처리 등 애플리케이션 전반에서 사용하는 지원 코드를 제공한다.|공통 예외, 오류 타입|
+
+비즈니스 Domain Entity는 JPA Entity와 분리하지 않고 같은 모델로 사용하며, `commerce-api`의 `domain/{feature}`에 배치한다. `modules/jpa`에는 비즈니스 Entity를 두지 않고 `BaseEntity`와 공통 JPA 설정만 둔다. 영속 모델을 분리하는 대안과 선택에 따른 비용은 부록 A.6에서 비교한다.
+
+단일 도메인 기능은 Controller가 Domain Service를 직접 호출하고, 여러 도메인이 협력하는 기능은 Facade를 호출한다.
+
+```text
+Controller
+    → Domain Service @Transactional
+        → Repository 인터페이스
+```
+
+여러 도메인이 협력하는 유스케이스는 Facade가 전체 처리 순서를 조율한다. Facade는 Domain Service를 반드시 거치지 않고 Repository 인터페이스로 객체를 조회·저장한 뒤 Entity 또는 Domain Service의 행동을 호출할 수 있다.
+
+```text
+Controller
+    → Facade @Transactional
+        ├→ Repository 인터페이스로 객체 조회·저장
+        ├→ Entity 행동 호출
+        └→ Domain Service @Transactional 호출
+```
+
+Facade가 여러 도메인의 변경을 조율하는 경우 Facade가 전체 트랜잭션을 시작한다. Facade 안에서 호출된 Domain Service의 `@Transactional`은 기본 전파 속성인 `REQUIRED`에 따라 Facade가 시작한 트랜잭션에 참여하므로 별도의 트랜잭션으로 분리되거나 충돌하지 않는다. Domain Service가 Controller에서 직접 호출되는 경우에는 Domain Service가 해당 단일 도메인 유스케이스의 트랜잭션을 시작한다.
+
+이 설명은 `@Transactional`의 기본 전파 속성인 `REQUIRED`를 기준으로 한다. 이후 `REQUIRES_NEW`처럼 별도 트랜잭션을 생성하는 전파 속성을 사용하면 트랜잭션 경계를 다시 검토한다.
+
+Facade와 Domain Service가 같은 Repository 인터페이스를 사용하는 것은 순환 의존이 아니지만, 동일한 조회·저장 책임이 두 곳에 중복되지 않도록 호출 목적을 구분한다. Facade는 도메인의 상태를 직접 변경하거나 업무 규칙을 중복해서 구현하지 않는다. Facade가 서로 다른 책임을 함께 가지게 되면 유스케이스를 기준으로 분리한다.
+
+모든 유스케이스를 Facade로 통일하는 대안과 호출 경계를 구분해 선택한 이유는 부록 A.7에서 비교한다.
 
 ### 2.3 허용하는 의존 방향
 
-```
-interfaces → application → domain
-infrastructure ─────────→ domain (구현)
+```mermaid
+flowchart LR
+    Interfaces[interfaces]
+    Application[application]
+    Domain[domain]
+    Infrastructure[infrastructure]
+
+    Interfaces --> Application
+    Interfaces --> Domain
+    Application --> Domain
+    Infrastructure -. Repository 구현 .-> Domain
 ```
 
-- **domain**은 다른 어떤 계층에도 의존하지 않는다.
-- **application**은 domain에만 의존한다. interfaces·infrastructure는 참조하지 않는다.
+*그림 2. `commerce-api`의 계층 간 허용 의존 방향*
+
+- **domain**은 interfaces·application·infrastructure에 의존하지 않는다.
+- **application**은 domain에 의존하며 interfaces·infrastructure는 참조하지 않는다.
 - **interfaces**는 application·domain에 의존할 수 있으나 infrastructure는 직접 참조하지 않는다.
 - **infrastructure**는 domain이 선언한 인터페이스를 구현하기 위해 domain에 의존한다. application·interfaces에는 의존하지 않는다.
-- **support**는 공통 오류 처리 등 지원 코드를 제공하며, 하위 패키지(예: error)의 역할에 따라 참조 범위가 정해진다. 모든 계층이 자유롭게 참조 가능한 독립 계층으로 간주하지 않는다.
+- **support**는 주요 계층과 별도로 공통 지원 코드를 제공한다. 하위 패키지의 역할에 따라 참조 범위를 정하며, 모든 계층이 자유롭게 참조할 수 있는 독립 계층으로 간주하지 않는다.
 
 ### 2.4 Repository 추상화 위치
 
-domain이 필요한 저장 행동을 인터페이스로 선언하고, infrastructure가 이를 구현한다(DIP). application은 인터페이스의 메서드 이름·입력·반환 타입만 알면 되고, 실제 구현이 JPA인지 테스트용 fake인지는 알 필요가 없다.
+domain이 필요한 저장 행동을 인터페이스로 선언하고, infrastructure가 이를 구현한다(DIP). Facade와 Domain Service는 Repository 인터페이스의 메서드와 입출력 타입만 알며, 실제 구현이 JPA인지 테스트용 fake인지는 알지 못한다.
 
 - 인터페이스는 `domain/{기능}`에 `{기능}Repository`로 선언한다.
-- 구현체는 `infrastructure/{기능}`에 `{기능}RepositoryImpl`(도메인 인터페이스 구현)과 `{기능}JpaRepository`(Spring Data JPA)로 둔다.
+- 구현체는 `infrastructure/{기능}`에 `{기능}RepositoryImpl`(도메인 인터페이스 구현)과 `{기능}JpaRepository`(Spring Data JPA)로 둔다. 단순 조회·저장은 JpaRepository에 위임하고, 동적 조건이나 복잡한 조회가 필요하면 RepositoryImpl에서 QueryDSL을 사용할 수 있다.
 
 ```java
 // domain/product
@@ -122,31 +162,508 @@ public interface ProductRepository {
 
 // infrastructure/product
 // ProductRepositoryImpl이 ProductRepository를 구현하고, 내부에서 ProductJpaRepository(Spring Data JPA)에 위임한다.
-// application/product: 유스케이스가 ProductRepository를 주입받아 사용
+// 복잡한 조회에는 필요한 경우 JPAQueryFactory를 사용한다.
+// Facade 또는 Domain Service가 ProductRepository를 주입받아 사용한다.
 ```
 
-찾는 대상이 없을 때의 처리(예: NOT_FOUND)는 Repository가 아니라 호출자(domain service)가 판단한다. 테스트에서는 이 인터페이스에 DB 없이 값을 돌려주는 fake 구현을 연결해 application을 검증한다.
+찾는 대상이 없을 때의 처리(예: NOT_FOUND)는 Repository가 아니라 호출자인 Facade 또는 Domain Service가 판단한다.
+
+이 추상화를 통해 Facade는 Spring Data JPA나 QueryDSL 같은 구체적인 Repository 및 조회 구현에 직접 의존하지 않는다. Domain Service 또한 구체적인 구현체가 아닌 Repository 인터페이스를 사용한다. 따라서 Repository 구현과 조회 방식의 변경 영향은 주로 infrastructure에 머물며, 테스트에서는 실제 데이터베이스 대신 fake 구현을 연결해 Facade와 Domain Service의 로직을 검증할 수 있다. 대신 필요한 저장 행동을 domain의 Repository 인터페이스에 명시하고, infrastructure에 위임 코드를 작성해야 하는 비용이 발생한다.
 
 ### 2.5 ArchUnit 검증 규칙
 
-`ArchitectureTest.java`가 실제로 강제하는 규칙은 다음과 같다.
+`ArchitectureTest.java`는 다음 계층 간 금지 의존을 검사하며, 위반하면 테스트가 실패한다.
 
-|규칙|검증 여부|
+|검사 대상|금지하는 의존|
 |---|---|
-|domain은 interfaces·application·infrastructure에 의존하지 않는다|ArchUnit 검증됨|
-|application은 interfaces·infrastructure에 의존하지 않는다|ArchUnit 검증됨|
-|interfaces는 infrastructure에 의존하지 않는다|ArchUnit 검증됨|
-|infrastructure는 application·interfaces에 의존하지 않는다|미검증 — 추가 필요|
+|domain|interfaces·application·infrastructure|
+|application|interfaces·infrastructure|
+|interfaces|infrastructure|
+|infrastructure|application·interfaces|
+
+support는 독립된 계층으로 취급하지 않으므로 계층 간 의존 규칙의 검증 대상에 포함하지 않는다.
+
+이 테스트는 컴파일된 클래스의 패키지·타입 의존을 검사한다. 각 클래스가 업무적으로 적절한 책임을 가졌는지와 런타임 동작의 정확성까지 보장하지는 않는다.
 
 ## 3. 도메인 관계
 
+### 3.1 도메인 구성과 주요 모델
+
+시스템의 주요 도메인과 각 도메인에 포함되는 모델은 다음과 같다. 주요 모델에는 Entity뿐 아니라 요구사항에서 독립된 책임이 드러나는 Value Object도 포함하며, 구현 과정에서 생길 수 있는 모든 Value Object를 나열하지는 않는다.
+
+|도메인|주요 모델|담당 영역|
+|---|---|---|
+|브랜드|`Brand`|브랜드 정보와 생명주기|
+|상품|`Product`, `Stock` (VO), `StockHistory`, `Like`|상품 정보, 현재 재고와 변경 이력, 사용자 좋아요 관계|
+|사용자|`User`|사용자 식별과 소유 관계의 기준|
+|주문|`Order`, `OrderItem`|주문 상태, 주문 품목과 결제 정보|
+|포인트|`Point`, `PointHistory`|사용자별 포인트 잔액과 변경 이력|
+
+Stock은 Product와 독립된 식별자와 생명주기가 필요하지 않으므로 Product가 소유하는 Value Object로 둔다. 독립 Entity나 단순 수량 필드로 표현하는 대안과 선택에 따른 비용은 부록 A.5에서 비교한다. Point와 Stock은 각각 현재 잔액과 재고의 기준이며, PointHistory와 StockHistory는 상태를 계산하기 위한 원장이 아니라 변경 원인과 결과를 남기는 기록으로 사용한다.
+
+현재 이력 조회 API는 없지만, 포인트 충전·사용과 관리자 재고 변경·주문 차감의 원인과 결과를 추적하기 위한 내부 기록으로 PointHistory와 StockHistory를 둔다. 현재 상태만 저장하는 대안과 선택에 따른 비용은 부록 A.1에서 비교한다.
+
+### 3.2 모델 간 관계와 책임
+
+```mermaid
+flowchart LR
+    Brand[Brand]
+    Product[Product]
+    Stock["Stock (VO)"]
+    StockHistory[StockHistory]
+    User[User]
+    Like[Like]
+    Point[Point]
+    PointHistory[PointHistory]
+    Order[Order]
+    OrderItem[OrderItem]
+
+    Brand -->|1 : N| Product
+    Product -.->|값으로 포함| Stock
+    Product -->|1 : N| StockHistory
+    User -->|1 : N| Like
+    Product -->|1 : N| Like
+    User -->|1 : 1| Point
+    Point -->|1 : N| PointHistory
+    User -->|1 : N| Order
+    Order -->|1 : N| OrderItem
+    Product -->|1 : N| OrderItem
+    Order -.->|확정 시 이력 생성| StockHistory
+    Order -.->|확정 시 이력 생성| PointHistory
+```
+
+*그림 3. 주요 도메인 모델 간 관계*
+
+Product는 Stock을 값으로 포함하고, Order는 OrderItem의 생명주기를 소유한다. History는 Product 또는 Point에 속한다. Order와 History 사이의 점선은 소유 관계가 아니라 주문 확정에 따른 변경 원인 관계다. 주문 확정으로 생성된 History는 원인이 된 Order 식별자를 선택적으로 기록한다. 나머지 선은 모델 간 업무 관계를 나타내며, 구체적인 단방향·양방향 참조와 JPA 연관관계 매핑 방식은 구현 단계에서 결정한다.
+
+|관계|책임과 핵심 규칙|
+|---|---|
+|Brand–Product|Product는 하나의 Brand에 속한다. 삭제되지 않은 Product가 남아 있는지는 Facade가 확인하고, 삭제할 수 있을 때 Brand가 자신의 삭제 상태를 변경한다.|
+|Product–Stock|Product는 Stock Value Object를 소유한다. Stock은 현재 수량을 관리하고 음수 재고를 허용하지 않으며, 관리자 변경과 주문 확정에 필요한 수량 변경 행동을 제공한다.|
+|Product–StockHistory|StockHistory는 관리자 재고 변경과 주문 확정에 따른 재고 변경의 원인과 결과를 기록한다.|
+|User–Like–Product|Like는 User와 Product 사이의 관계를 나타낸다. 같은 사용자가 같은 상품에 만든 Like 관계는 중복될 수 없다.|
+|User–Point|이번 설계에서는 User 생성 유스케이스를 다루지 않는다. 실습용 User와 잔액이 0인 Point는 fixture로 함께 준비하며, 따라서 존재하는 User는 항상 하나의 Point를 가진다. Point는 현재 잔액과 충전·사용 행동을 관리하며, 잔액은 0을 허용하지만 음수가 될 수 없다.|
+|Point–PointHistory|PointHistory는 포인트 충전과 주문 사용에 따른 잔액 변경의 원인과 결과를 기록한다.|
+|User–Order|Order는 소유자인 User를 식별한다. 고객은 자신의 주문만 조회하고 확정할 수 있다.|
+|Order–OrderItem|Order는 하나 이상의 OrderItem을 소유한다. OrderItem은 주문 당시 상품, 수량과 단가를 보관하고, Order는 품목 금액의 합으로 주문 총액을 관리한다.|
+|Product–OrderItem|OrderItem은 주문한 Product를 참조한다. 상품 정보가 변경되더라도 이미 저장된 주문 품목의 수량과 단가는 변경되지 않는다.|
+|Order–StockHistory·PointHistory|주문 확정으로 생성된 StockHistory와 PointHistory는 원인이 된 주문 식별자를 기록한다. 관리자 재고 변경과 포인트 충전으로 생성된 History에는 주문 참조가 없다.|
+
+실습 요구사항에 따라 Order는 `DRAFT`와 `CONFIRMED` 상태를 가진다. 주문 생성 시 `DRAFT`가 되며, 소유자의 주문 확정 과정에서 재고와 포인트 차감이 모두 성공하면 `CONFIRMED`로 전이한다. 이미 `CONFIRMED`인 주문은 다시 확정할 수 없다.
+
+Order는 주문 총액, 포인트 사용액과 결제액을 구분해 기록한다. 각 금액의 정의와 계산 규칙은 5.1을 따르며, 구분해 저장하는 이유와 비용은 부록 A.4에서 비교한다.
+
+재고·포인트의 유효성이나 주문 상태 전이처럼 모델 자신의 상태로 판단할 수 있는 규칙은 해당 모델이 지킨다. 브랜드 삭제 가능 여부나 주문 확정처럼 여러 모델의 조회와 협력이 필요한 처리는 Facade가 조율한다. 상품 조회에서 브랜드명과 좋아요 수를 조합하는 일은 Product의 상태 규칙이 아니라 application의 조회 결과 구성 책임으로 둔다.
+
+### 3.3 삭제 정책
+
+**선택한 정책**
+
+Brand와 Product는 삭제 시각을 기록하는 Soft Delete 방식을 사용한다. 기존 주문·좋아요·이력과의 관계를 보존하면서, 삭제된 데이터를 고객 조회와 신규 주문에서 제외하기 위해서다. 삭제되지 않은 Product가 남아 있는 Brand는 삭제할 수 없다.
+
+구체적인 JPA 구현 방식은 여기서 확정하지 않는다. 관리자 조회에서 삭제된 데이터를 포함할지와 이미 삭제된 대상에 대한 요청 처리는 5장의 API 계약과 주요 규칙에서 정한다.
+
+삭제 방식의 대안과 선택에 따른 비용은 부록 A.2에서 비교한다.
+
 ## 4. 대표 흐름
+
+### 4.1 포인트 충전 후 주문 확정
+
+포인트 충전 후 주문 확정을 대표 흐름으로 선택한다. 이 흐름은 단일 도메인을 처리하는 Domain Service와 주문·상품·포인트가 협력하는 Facade의 역할, 주문 확정 시 함께 변경되어야 하는 상태와 트랜잭션 경계를 보여 준다.
+
+주문 생성은 이 흐름보다 먼저 완료되어 있으며, 고객이 소유한 `DRAFT` 주문이 존재한다고 가정한다. 포인트 충전과 주문 확정은 서로 다른 API 요청이자 별도의 트랜잭션이다. 따라서 주문 확정이 실패하더라도 앞서 완료된 포인트 충전 결과는 유지된다.
+
+주문 확정은 5.1의 전액 포인트 결제 규칙을 따른다. 주문 총액 전부를 포인트로 결제하며, 주문 확정 요청에서 사용할 포인트를 별도로 입력하지 않는다. 따라서 포인트 사용액과 결제액은 주문 총액과 같으며, 고객의 포인트 잔액이 주문 총액보다 적으면 확정을 거절한다.
+
+### 4.2 포인트 충전
+
+포인트 충전은 Point 도메인 안에서 완료되는 단일 도메인 유스케이스이므로 `PointService`가 트랜잭션을 관리한다.
+
+PointService는 User와 함께 fixture로 준비된 Point를 조회한다. 존재하는 User에게 Point가 없는 경우에는 최초 충전으로 간주해 새로 생성하지 않고 비정상적인 데이터 상태로 처리한다. 구체적인 오류 응답은 5장의 API 계약에서 정한다.
+
+```mermaid
+sequenceDiagram
+    actor Customer as 고객
+    participant Controller as PointV1Controller
+    participant Service as PointService
+    participant PointRepository
+    participant Point
+    participant HistoryRepository as PointHistoryRepository
+
+    Customer->>Controller: 포인트 충전 요청
+    Controller->>Service: charge(userId, amount)
+    Service->>PointRepository: 사용자 Point 조회
+    PointRepository-->>Service: Point
+    Service->>Point: charge(amount)
+    Point-->>Service: 충전 후 잔액
+    Service->>HistoryRepository: 충전 History 저장
+    Service->>PointRepository: Point 저장
+    Service-->>Controller: 충전 후 잔액
+    Controller-->>Customer: 성공 응답
+```
+
+*그림 4. 포인트 충전 객체 협력 흐름*
+
+Point는 충전 금액이 양수인지 확인하고 잔액을 증가시킨다. fixture에서 Point에 설정한 초기 잔액 0은 충전이나 사용에 따른 변경이 아니므로 PointHistory를 생성하지 않는다. PointHistory에는 충전에 따른 변경 원인과 결과를 기록하며, Point 변경과 History 저장은 같은 트랜잭션에서 처리한다. 입력이나 저장에 실패하면 잔액과 History는 모두 변경되지 않는다.
+
+### 4.3 주문 확정
+
+주문 확정은 Order, Product·Stock, Point가 함께 변경되는 다중 도메인 유스케이스이므로 `OrderFacade`가 전체 처리 순서와 트랜잭션을 관리한다.
+
+```mermaid
+sequenceDiagram
+    actor Customer as 고객
+    participant Controller as OrderV1Controller
+    participant Facade as OrderFacade
+    participant OrderRepository
+    participant ProductRepository
+    participant PointRepository
+    participant Order
+    participant Item as OrderItem
+    participant Product as Product / Stock
+    participant Point
+    participant StockHistoryRepository
+    participant PointHistoryRepository
+
+    Customer->>Controller: 주문 확정 요청
+    Controller->>Facade: confirm(userId, orderId)
+    Facade->>OrderRepository: Order 조회
+    OrderRepository-->>Facade: Order (OrderItems 포함)
+    Facade->>Order: 소유자와 DRAFT 상태 확인
+    Facade->>Order: 주문 품목 조회
+    Order-->>Facade: OrderItems
+    Facade->>ProductRepository: OrderItem의 productId로 상품 조회
+    ProductRepository-->>Facade: Products
+    Facade->>PointRepository: 사용자 Point 조회
+    PointRepository-->>Facade: Point
+    Facade->>Point: 주문 총액만큼 사용
+    Point-->>Facade: 실제 포인트 사용액
+
+    loop 각 OrderItem
+        Facade->>Item: productId와 quantity 확인
+        Facade->>Product: OrderItem 수량만큼 재고 차감
+        Facade->>StockHistoryRepository: 재고 변경 History 저장
+    end
+
+    Facade->>PointHistoryRepository: 포인트 사용 History 저장
+    Facade->>Order: confirmWithPoints(포인트 사용액)
+    Facade->>ProductRepository: 변경된 Products 저장
+    Facade->>PointRepository: 변경된 Point 저장
+    Facade->>OrderRepository: CONFIRMED Order 저장
+    Facade-->>Controller: 주문 확정 결과
+    Controller-->>Customer: 성공 응답
+```
+
+*그림 5. 주문 확정 객체 협력 흐름*
+
+OrderRepository는 Order와 Order가 소유한 OrderItem을 함께 복원한다. 구체적인 JPA 로딩 방식은 구현 단계에서 결정한다. 재고 차감에 사용하는 상품과 수량은 확정 요청에서 다시 받지 않고, 저장된 OrderItem의 `productId`와 `quantity`를 기준으로 한다.
+
+Order는 요청자가 주문 소유자인지와 현재 상태가 `DRAFT`인지 확인한다. Point는 잔액이 주문 총액 이상인지 확인한 뒤 주문 총액을 먼저 차감하고 실제 포인트 사용액을 반환한다. 이후 각 OrderItem에 대응하는 Product와 Stock이 상품의 주문 가능 여부와 재고를 확인하고 수량을 차감한다. Order는 포인트 사용액이 주문 총액과 같은지 확인하고, 같은 금전적 가치를 결제액으로 기록한 뒤 `CONFIRMED`로 전이한다. 이 상태 전이가 주문 확정과 결제의 성공 결과를 나타낸다. StockHistory와 PointHistory는 각각 변경 원인과 결과 및 원인이 된 주문 식별자를 기록한다. Point와 Stock의 처리 순서를 선택한 근거와 비용은 부록 A.3에서 비교한다.
+
+주문이 없거나 요청자가 소유자가 아닌 경우, 주문이 이미 확정된 경우, 상품이 없거나 삭제된 경우, 재고 또는 포인트가 부족한 경우에는 확정을 거절한다. 주문 확정 중 하나의 검증이나 저장이라도 실패하면 재고·포인트·History·주문 상태 변경을 모두 롤백한다. 앞서 별도 트랜잭션으로 완료된 포인트 충전은 이 롤백에 포함되지 않는다.
 
 ## 5. API 계약과 주요 규칙
 
-### 5.1 공통 규칙
+이 장은 구현할 API의 입력, 성공 결과와 대표 오류를 정의한다. 모든 조합을 테스트 사례로 나열하기보다 도메인 규칙과 HTTP 계약을 연결하고, 구현 단계에서는 이 계약으로부터 정상 경로와 경계값·실패 테스트를 도출한다.
 
-- 주문 생성 시에는 포인트와 재고를 차감하지 않고, 주문 확정 시 차감한다.
-- 삭제된 브랜드·상품은 고객 조회와 신규 주문에서 제외한다.
+### 5.1 공통 계약과 입력 정책
 
-## 6. 설계 결정 요약
+#### 요청자 식별과 접근 범위
+
+- 고객 API는 `X-USER-ID` 헤더로 실습용 사용자를 식별한다. 헤더가 누락되면 `400 INVALID_REQUEST`, 식별한 사용자가 없으면 `404 USER_NOT_FOUND`로 응답한다.
+- 고객은 자신의 좋아요·포인트·주문만 조회하거나 변경할 수 있다. 다른 사용자의 소유 자원은 존재 여부를 노출하지 않고 해당 자원의 `NOT_FOUND` 오류로 처리한다.
+- 관리자 API는 `/api-admin/**` 경로에 적용한 Spring Security 설정으로 구분한다. `ADMIN` 역할이 없는 일반 사용자와 식별되지 않은 요청은 모두 `403 Forbidden`으로 거절한다. 이 설정은 로컬 실습과 MockMvc 검증을 위한 경계이며 운영용 로그인 방식을 의미하지 않는다.
+- 경로 변수, 쿼리 파라미터와 `X-USER-ID` 헤더로 전달하는 모든 식별자는 숫자 형식이어야 한다. 숫자로 변환할 수 없으면 `400 INVALID_REQUEST`로 응답한다. 숫자로 변환된 이후 대상이 존재하는지는 각 API의 조회 규칙에 따라 판단한다.
+
+#### 공통 응답과 상태 코드
+
+응답 본문이 있는 성공과 업무 오류는 기존 `ApiResponse<T>` 형식을 사용한다.
+
+```json
+{
+  "meta": {
+    "result": "SUCCESS",
+    "errorCode": null,
+    "message": null
+  },
+  "data": {}
+}
+```
+
+실패 응답은 `meta.result`를 `FAIL`로 설정하고 안정적인 업무 오류 코드와 메시지를 제공하며, `data`는 `null`로 반환한다.
+
+```json
+{
+  "meta": {
+    "result": "FAIL",
+    "errorCode": "POINT_NOT_INITIALIZED",
+    "message": "포인트 정보가 초기화되지 않았습니다."
+  },
+  "data": null
+}
+```
+
+- 조회와 상태 변경은 `200 OK`, 새 Brand·Product·Like·Order 생성은 `201 Created`로 응답한다.
+- 삭제는 `200 OK`와 `data: null`로 응답해 공통 응답 형식을 유지한다.
+- 요청 형식과 값이 잘못된 경우 `400`, 대상이 없거나 접근할 수 없는 경우 `404`, 현재 상태나 중복 관계 때문에 수행할 수 없는 경우 `409`를 사용한다.
+- 요청과 무관하게 서버 내부 데이터의 불변식이 깨진 경우에는 `500`을 사용한다. 예를 들어 존재하는 User에게 Point가 없으면 `500 POINT_NOT_INITIALIZED`로 응답한다.
+- 같은 HTTP 상태 안에서도 클라이언트가 실패 원인을 구분할 수 있도록 `PRODUCT_NOT_FOUND`, `LIKE_ALREADY_EXISTS`, `INSUFFICIENT_STOCK`과 같은 안정적인 업무 오류 코드를 사용한다. 현재 범용 HTTP 코드만 제공하는 `ErrorType`은 구현 과정에서 업무 오류 코드를 표현할 수 있도록 확장한다.
+- Soft Delete된 Brand·Product는 활성 자원을 대상으로 하는 API에서 존재하지 않는 것으로 처리한다. 이미 삭제된 대상을 다시 삭제하는 요청도 각각 `404 BRAND_NOT_FOUND`, `404 PRODUCT_NOT_FOUND`로 응답한다.
+- 오류가 발생하면 해당 요청에서 변경하려던 Entity와 History는 저장하지 않는다.
+
+공통 식별·입력 형식 오류는 모든 API에 적용하며, API별 표의 대표 오류에서는 반복해 적지 않는다.
+
+Spring Security 필터에서 거절되는 관리자 요청은 실습 지원 설정에 따라 `403` 상태만 계약으로 보장하며, `ApiResponse` 본문 검증 대상에서는 제외한다.
+
+#### 잠정 입력 정책
+
+기능 구현과 경계값 테스트를 시작할 수 있도록 다음 값을 잠정 기준으로 사용한다.
+
+|항목|잠정 기준|잘못된 입력|
+|---|---|---|
+|브랜드명|앞뒤 공백 제거 후 1~100자|`400 INVALID_BRAND_NAME`|
+|상품명|앞뒤 공백 제거 후 1~100자|`400 INVALID_PRODUCT_NAME`|
+|상품 가격|1~100,000,000원인 정수|`400 INVALID_PRODUCT_PRICE`|
+|주문 수량|품목별 1 이상의 정수|`400 INVALID_ORDER_QUANTITY`|
+|재고 수량|0 이상의 정수|`400 INVALID_STOCK_QUANTITY`|
+|포인트 충전액|1 이상의 정수|`400 INVALID_POINT_AMOUNT`|
+|상품 목록 페이지|`page=0`, `size=20`, 최대 `size=100`|`page < 0`, `size < 1` 또는 `size > 100`이면 `400 INVALID_PAGE_REQUEST`|
+
+수량 합산, 품목 금액, 주문 총액, 포인트 잔액 계산이 저장 타입의 표현 범위를 넘으면 `400 NUMERIC_OVERFLOW`로 거절한다. 브랜드명·상품명·가격 범위, 페이지 기본값·최대 크기, 상품의 초기 재고 0과 브랜드 필터 결과 처리는 요구사항에 명시되지 않은 구현용 가이드이므로 **기획 확인이 필요하다**. 값이나 처리 방식이 변경되면 API 계약과 관련 테스트를 함께 수정한다.
+
+상품 목록의 기본 정렬은 `latest`로 한다. 정렬별 기준과 동률의 보조 정렬은 다음과 같다.
+
+|정렬 값|주 정렬|동률의 보조 정렬|
+|---|---|---|
+|`latest`|생성 시각 내림차순|상품 ID 내림차순|
+|`price_asc`|가격 오름차순|상품 ID 오름차순|
+|`likes_desc`|좋아요 수 내림차순|상품 ID 내림차순|
+
+지원하지 않는 정렬 값은 `400 INVALID_SORT`로 거절한다. 이 기본값과 보조 정렬 기준도 **기획 확인이 필요한 잠정 정책**이다.
+
+#### 주문 금액 규칙
+
+- 주문 생성 요청은 상품 식별자와 수량만 받는다. 단가는 요청값을 신뢰하지 않고 주문 생성 시점의 Product 가격을 OrderItem에 저장한다.
+- 주문 총액은 각 OrderItem의 `수량 × 주문 당시 단가`로 계산한 품목 금액의 합이다.
+- 주문 생성 시에는 포인트와 재고를 차감하지 않고 `DRAFT`로 저장한다.
+- 주문 확정 시 주문 총액 전부를 포인트로 차감하며, 사용할 포인트 금액은 별도로 입력받지 않는다.
+- 포인트 사용액은 주문 확정 시 실제로 차감한 포인트이고, 결제액은 포인트로 결제된 금전적 가치다. 현재 전액 포인트 결제 정책에서는 주문 총액, 포인트 사용액과 결제액이 서로 같다.
+- 주문 확정과 결제의 성공 결과는 Order의 `CONFIRMED` 상태로 기록한다.
+
+### 5.2 고객 API
+
+모든 고객 API는 `X-USER-ID` 헤더를 필수로 받는다.
+
+#### 브랜드·상품
+
+|기능|Method & Path|입력|성공 결과|대표 오류|
+|---|---|---|---|---|
+|브랜드 상세|`GET /api/v1/brands/{brandId}`|브랜드 ID|`200`, 활성 브랜드 정보|`BRAND_NOT_FOUND`|
+|상품 목록|`GET /api/v1/products`|선택적 `brandId`, `page`, `size`, `sort`|`200`, 상품·브랜드·좋아요 수와 페이지 정보|`INVALID_PAGE_REQUEST`, `INVALID_SORT`|
+|상품 상세|`GET /api/v1/products/{productId}`|상품 ID|`200`, 상품·브랜드·좋아요 수|`PRODUCT_NOT_FOUND`|
+
+고객 조회에는 삭제된 Brand와 Product를 노출하지 않는다. 상품 목록 요청에 `brandId`가 주어졌지만 해당 ID의 브랜드가 존재하지 않거나 삭제된 경우에는 `404`로 처리하지 않고 `200 OK`와 빈 페이지를 반환한다.
+
+#### 좋아요
+
+|기능|Method & Path|입력|성공 결과|대표 오류|
+|---|---|---|---|---|
+|좋아요 등록|`POST /api/v1/products/{productId}/likes`|상품 ID|`201`, 생성된 Like 관계|`PRODUCT_NOT_FOUND`, `LIKE_ALREADY_EXISTS`|
+|좋아요 취소|`DELETE /api/v1/products/{productId}/likes`|상품 ID|`200`, 데이터 없는 성공 응답|`LIKE_NOT_FOUND`|
+|내 좋아요 목록|`GET /api/v1/users/{userId}/likes`|경로의 사용자 ID|`200`, 활성 상품에 대한 자신의 좋아요 목록|`USER_NOT_FOUND`|
+
+- 같은 User와 Product의 Like는 하나만 존재한다. 중복 등록은 `409 LIKE_ALREADY_EXISTS`로 거절하고 좋아요 수를 변경하지 않는다.
+- 취소할 Like 관계가 없으면 `404 LIKE_NOT_FOUND`로 응답한다.
+- 삭제된 Product에는 새 Like를 등록할 수 없고 내 좋아요 목록에서도 제외한다. 다만 삭제 전에 생성한 자신의 Like 관계는 취소할 수 있으므로, 이 경우 Product의 삭제 여부와 관계없이 Like를 찾아 삭제한다.
+- 내 좋아요 목록에서 `X-USER-ID`는 요청자를, 경로의 `{userId}`는 조회 대상을 식별한다. 실습 API에 명시된 경로를 유지하며, 두 값이 다르면 다른 사용자의 관계를 노출하지 않고 `404 USER_NOT_FOUND`로 응답한다.
+
+#### 포인트
+
+|기능|Method & Path|입력|성공 결과|대표 오류|
+|---|---|---|---|---|
+|포인트 충전|`POST /api/v1/points/charge`|본문 `amount`|`200`, 충전 후 잔액|`INVALID_POINT_AMOUNT`, `NUMERIC_OVERFLOW`, `POINT_NOT_INITIALIZED`|
+|포인트 잔액 조회|`GET /api/v1/points`|추가 입력 없음|`200`, 현재 잔액|`POINT_NOT_INITIALIZED`|
+
+1포인트는 1원으로 계산한다. 잔액 0은 유효하지만 충전 요청 0은 유효하지 않다. 존재하는 User에게 fixture로 함께 준비되어야 할 Point가 없는 경우에는 새 Point를 만들지 않고 데이터 불변식 위반인 `500 POINT_NOT_INITIALIZED`로 응답한다.
+
+#### 주문
+
+|기능|Method & Path|입력|성공 결과|대표 오류|
+|---|---|---|---|---|
+|주문 생성|`POST /api/v1/orders`|본문 `items[{productId, quantity}]`|`201`, 품목·주문 총액과 `DRAFT` 상태|`INVALID_ORDER_ITEMS`, `INVALID_ORDER_QUANTITY`, `PRODUCT_NOT_FOUND`, `NUMERIC_OVERFLOW`|
+|주문 확정|`POST /api/v1/orders/{orderId}/confirm`|주문 ID, 요청 본문 없음|`200`, 품목·주문 총액·포인트 사용액·결제액과 `CONFIRMED` 상태|`ORDER_NOT_FOUND`, `ORDER_NOT_CONFIRMABLE`, `PRODUCT_NOT_FOUND`, `INSUFFICIENT_POINT`, `INSUFFICIENT_STOCK`|
+|내 주문 목록|`GET /api/v1/orders`|추가 입력 없음|`200`, 자신의 주문 목록|없음|
+|내 주문 상세|`GET /api/v1/orders/{orderId}`|주문 ID|`200`, 품목별 상품·수량·주문 당시 단가·품목 금액, 주문 총액·포인트 사용액·결제액과 상태|`ORDER_NOT_FOUND`|
+
+- 주문 품목은 하나 이상이어야 하며 각 요청 품목의 수량이 1 이상인지 먼저 검증한다. 그다음 같은 Product의 수량을 합산하고 표현 범위를 확인해 하나의 OrderItem으로 저장한다. 중복 품목을 거절하는 대안과 합산을 선택한 이유는 부록 A.8에서 비교한다.
+- 주문 생성 시 Product의 존재와 삭제 여부, 수량과 금액을 검증하지만 재고와 포인트는 차감하지 않는다.
+- `DRAFT` 주문의 포인트 사용액과 결제액은 아직 결제가 발생하지 않았으므로 `null`로 반환한다. `CONFIRMED` 주문에는 주문 확정 시 기록한 값을 반환한다.
+- 주문 확정은 저장된 OrderItem을 기준으로 처리한다. 고객이 소유한 `DRAFT` 주문만 확정할 수 있으며, 이미 확정된 주문은 `409 ORDER_NOT_CONFIRMABLE`로 거절한다.
+- 주문이 없거나 요청자가 소유자가 아니면 모두 `404 ORDER_NOT_FOUND`로 응답한다.
+- 포인트나 어느 한 상품의 재고가 부족하면 각각 `409 INSUFFICIENT_POINT`, `409 INSUFFICIENT_STOCK`으로 응답하고 주문 확정 과정의 모든 변경을 롤백한다.
+
+### 5.3 관리자 API
+
+모든 관리자 API는 Spring Security에서 인증된 `ADMIN` 역할을 요구한다.
+
+#### 브랜드
+
+|기능|Method & Path|입력|성공 결과|대표 오류|
+|---|---|---|---|---|
+|브랜드 목록|`GET /api-admin/v1/brands`|추가 입력 없음|`200`, 관리자용 브랜드 목록|없음|
+|브랜드 등록|`POST /api-admin/v1/brands`|본문 `name`|`201`, 등록한 브랜드|`INVALID_BRAND_NAME`|
+|브랜드 상세|`GET /api-admin/v1/brands/{brandId}`|브랜드 ID|`200`, 관리자용 브랜드 상세|`BRAND_NOT_FOUND`|
+|브랜드 수정|`PUT /api-admin/v1/brands/{brandId}`|본문 `name`|`200`, 수정한 브랜드|`BRAND_NOT_FOUND`, `INVALID_BRAND_NAME`|
+|브랜드 삭제|`DELETE /api-admin/v1/brands/{brandId}`|브랜드 ID|`200`, 데이터 없는 성공 응답|`BRAND_NOT_FOUND`, `BRAND_HAS_ACTIVE_PRODUCTS`|
+
+삭제되지 않은 Product가 하나라도 연결되어 있으면 재고가 0이어도 Brand 삭제를 `409 BRAND_HAS_ACTIVE_PRODUCTS`로 거절한다.
+
+#### 상품·재고
+
+|기능|Method & Path|입력|성공 결과|대표 오류|
+|---|---|---|---|---|
+|상품 목록|`GET /api-admin/v1/products`|추가 입력 없음|`200`, 관리자용 상품 목록|없음|
+|상품 등록|`POST /api-admin/v1/products`|본문 `brandId`, `name`, `price`|`201`, 재고 0으로 등록한 상품|`BRAND_NOT_FOUND`, `INVALID_PRODUCT_NAME`, `INVALID_PRODUCT_PRICE`|
+|상품 상세|`GET /api-admin/v1/products/{productId}`|상품 ID|`200`, 관리자용 상품 상세|`PRODUCT_NOT_FOUND`|
+|상품 수정|`PUT /api-admin/v1/products/{productId}`|본문 `name`, `price`|`200`, 수정한 상품|`PRODUCT_NOT_FOUND`, `INVALID_PRODUCT_NAME`, `INVALID_PRODUCT_PRICE`|
+|상품 삭제|`DELETE /api-admin/v1/products/{productId}`|상품 ID|`200`, 데이터 없는 성공 응답|`PRODUCT_NOT_FOUND`|
+|재고 변경|`PUT /api-admin/v1/products/{productId}/stock`|본문 `quantity`|`200`, 변경 후 최종 재고 수량|`PRODUCT_NOT_FOUND`, `INVALID_STOCK_QUANTITY`|
+
+- Product 등록 시 존재하며 삭제되지 않은 Brand만 참조할 수 있고, 초기 Stock은 0으로 만든다.
+- Product 수정은 Brand를 변경하지 않는다. 수정 요청에도 `brandId`를 받지 않으며 기존 관계를 유지한다.
+- 재고 변경의 `quantity`는 증감량이 아니라 변경 후의 최종 수량이다. StockHistory에는 변경 전후 수량과 관리자 변경 원인을 남긴다.
+- 삭제된 Product는 수정과 재고 변경의 대상이 될 수 없으며 `404 PRODUCT_NOT_FOUND`로 응답한다.
+
+#### 주문 조회
+
+|기능|Method & Path|입력|성공 결과|대표 오류|
+|---|---|---|---|---|
+|전체 주문 목록|`GET /api-admin/v1/orders`|추가 입력 없음|`200`, 구매자를 포함한 전체 주문 목록|없음|
+|주문 상세|`GET /api-admin/v1/orders/{orderId}`|주문 ID|`200`, 구매자·품목·상태·주문 총액·포인트 사용액·결제액|`ORDER_NOT_FOUND`|
+
+관리자는 주문을 조회만 하며 상태를 변경하지 않는다.
+
+#### 기획 확인이 필요한 관리자 조회 정책
+
+Soft Delete된 Brand와 Product를 관리자 목록·상세에 포함할지는 요구사항에 명시되어 있지 않으므로 아직 확정하지 않는다. 구현 전에 다음 중 하나를 기획과 확인하고, 선택 결과에 맞춰 관리자 조회 계약과 테스트를 보완한다.
+
+- 기본 조회에서 활성 데이터만 제공하고 별도 조건으로 삭제 데이터를 조회한다.
+- 관리자 조회에는 삭제 데이터를 항상 포함하고 삭제 여부·시각을 함께 제공한다.
+
+이 미결정 사항과 무관하게 삭제된 대상의 수정·재고 변경·재삭제는 허용하지 않는다.
+
+### 5.4 대표 규칙의 테스트 기대값
+
+아래 표는 API 전체 테스트 목록이 아니라 구현 전에 기대값을 고정해야 하는 대표 사례다. 실패 사례는 HTTP 응답뿐 아니라 기존 상태가 유지되는지도 함께 확인한다.
+
+|규칙|주어진 상태와 요청|기대 결과|
+|---|---|---|
+|포인트 충전|잔액 0, 충전액 10,000|잔액 10,000과 PointHistory 저장|
+|유효하지 않은 충전|잔액 1,000, 충전액 0|`400 INVALID_POINT_AMOUNT`, 잔액과 History 유지|
+|포인트 초기화 불변식|존재하는 User에게 Point가 없는 상태에서 잔액 조회 또는 충전|`500 POINT_NOT_INITIALIZED`, Point와 PointHistory를 새로 생성하지 않음|
+|브랜드 필터 결과 `[잠정]`|존재하지 않거나 삭제된 `brandId`로 상품 목록 조회|`200 OK`, 비어 있는 페이지 반환|
+|좋아요 중복 방지|이미 Like가 있는 상품에 재등록|`409 LIKE_ALREADY_EXISTS`, 관계와 좋아요 수 유지|
+|삭제 상품 좋아요 취소|삭제 전 생성한 자신의 Like 취소|성공하고 Like 관계 삭제|
+|중복 주문 품목 합산|같은 상품을 수량 2와 3으로 요청|수량 5인 OrderItem 하나로 저장하고 총수량 기준으로 금액 계산|
+|주문 생성과 차감 분리|유효한 여러 품목으로 주문 생성|`DRAFT` 저장, 재고와 포인트는 유지|
+|DRAFT 주문 결제 정보|`DRAFT` 주문 상세 조회|주문 총액은 반환하고 포인트 사용액과 결제액은 `null`, 상태는 `DRAFT`|
+|주문 확정 성공|총액 7,000, 포인트 잔액 10,000, 충분한 재고|차감 후 포인트 잔액 3,000, 포인트 사용액 7,000, 결제액 7,000, 품목별 재고 차감, PointHistory와 품목별 StockHistory 저장, `CONFIRMED`|
+|포인트 부족|주문 총액보다 포인트가 적음|`409 INSUFFICIENT_POINT`, 주문·포인트·재고·History 유지|
+|재고 부족|한 품목의 재고가 주문 수량보다 적음|`409 INSUFFICIENT_STOCK`, 주문·포인트·모든 재고·History 유지|
+|주문 중복 확정|이미 `CONFIRMED`인 주문 확정|`409 ORDER_NOT_CONFIRMABLE`, 모든 상태 유지|
+|브랜드 삭제 조건|재고 0인 활성 Product가 연결된 Brand 삭제|`409 BRAND_HAS_ACTIVE_PRODUCTS`, Brand 유지|
+|상품 재고 변경|현재 수량 5, 최종 수량 2 요청|재고 2와 변경 전후 값을 가진 StockHistory 저장|
+|삭제 대상 재삭제|Soft Delete된 Brand 또는 Product 삭제|각각 `404 BRAND_NOT_FOUND`, `404 PRODUCT_NOT_FOUND`|
+|숫자 범위 초과|수량 합산이나 주문 총액 계산이 표현 범위를 초과|`400 NUMERIC_OVERFLOW`, 주문과 관련 상태를 저장하지 않음|
+
+## 부록 A. 설계 대안과 선택 근거
+
+### A.1 포인트·재고의 현재 상태와 변경 이력
+
+|대안|장점|비용|
+|---|---|---|
+|현재 상태만 저장|모델과 저장 작업이 적어 구현이 단순하다.|포인트와 재고가 변경된 원인과 이전 상태를 확인할 수 없다.|
+|현재 상태와 이력을 함께 저장|현재 상태를 바로 조회하면서 변경 과정도 추적할 수 있다.|History Entity·Repository와 쓰기 작업이 추가되고 현재 상태와 이력의 정합성을 관리해야 한다.|
+|이력만 저장하고 현재 상태를 계산|모든 변경을 원장으로 남기고 과거 상태를 재구성할 수 있다.|조회와 동시성 제어, 중복 처리와 상태 재구성이 현재 범위에 비해 복잡하다.|
+
+현재 상태와 이력을 함께 저장하는 대안을 선택한다. 포인트는 충전과 주문 사용의 근거를 보존하고, 재고는 관리자가 최종 수량을 덮어쓰기 전후의 상태와 주문 차감 원인을 추적할 필요가 있다. 현재 잔액과 재고는 각각 Point와 Stock을 기준으로 조회하고, PointHistory와 StockHistory는 변경 기록으로 사용한다.
+
+현재 상태 변경과 History 저장은 같은 트랜잭션에서 처리한다. 이 선택으로 향후 이력 조회나 취소·복구 기능으로 확장할 수 있지만, 추가 Entity·Repository·쓰기와 이력 누락·중복을 방지하는 테스트 비용이 발생한다.
+
+### A.2 브랜드·상품 삭제 정책
+
+|대안|장점|비용|
+|---|---|---|
+|삭제 시각을 이용한 Soft Delete|기존 관계를 보존하면서 삭제 여부와 시점을 함께 관리할 수 있다.|유효 데이터 조회 조건과 유일성 제약을 추가로 고려해야 한다.|
+|상태값을 이용한 Soft Delete|활성·삭제와 같은 상태를 명시적으로 표현할 수 있다.|상태 종류와 전이 규칙을 관리해야 하며, 삭제 시점을 기록하려면 필드가 추가로 필요하다.|
+|Hard Delete|삭제 후 별도의 조회 조건이 필요하지 않아 구현이 단순하다.|기존 주문·좋아요·이력과의 관계 보존 및 삭제 사실 추적이 어렵다.|
+
+삭제 시각을 이용한 Soft Delete를 선택한다. 삭제된 Brand와 Product는 기존 주문·좋아요·이력과의 관계를 유지하되 고객 조회와 신규 주문에서 제외한다. 이 선택으로 삭제 사실과 시점을 보존할 수 있지만, 유효 데이터 조회 조건과 유일성 제약을 일관되게 관리해야 하는 비용이 발생한다.
+
+### A.3 주문 확정의 포인트·재고 처리 순서
+
+초기 흐름에서는 주문 품목별 재고를 먼저 확인·차감한 뒤 포인트 잔액을 확인했다. 이후 AI 검토 과정에서 포인트 부족을 먼저 확인하면 여러 상품의 재고를 처리하기 전에 실패할 수 있다는 대안을 확인하고 처리 순서를 다시 검토했다.
+
+|대안|장점|비용|
+|---|---|---|
+|재고를 먼저 처리|품절이나 재고 부족을 포인트 변경 전에 확인할 수 있다.|포인트가 부족한 주문도 모든 OrderItem의 재고를 순회하고 변경하게 된다.|
+|포인트를 먼저 처리|한 번의 잔액 확인으로 결제 불가능한 주문을 먼저 거절하여 불필요한 재고 처리를 줄일 수 있다.|이후 재고 검증이 실패하면 앞서 변경한 Point를 롤백해야 하며, 동시성 제어 도입 시 포인트 잠금 유지 시간과 자원 획득 순서를 고려해야 한다.|
+
+현재 범위에서는 Point를 먼저 확인하고 주문 총액만큼 사용한 뒤, 각 OrderItem의 수량을 기준으로 재고를 차감하는 순서를 선택한다. 주문 확정 전체를 하나의 트랜잭션으로 처리하므로 이후 재고 처리나 저장이 실패하면 Point 변경도 함께 롤백된다.
+
+향후 비관적 락과 같은 동시성 제어를 도입하면 포인트와 상품의 잠금 획득 순서가 경합과 교착 상태에 영향을 줄 수 있으므로 처리 순서를 다시 검토한다.
+
+### A.4 주문 금액과 결제 정보의 구분
+
+|대안|장점|비용|
+|---|---|---|
+|주문 총액만 저장|현재 전액 포인트 결제에서는 필요한 값이 같아 구현과 정합성 관리가 단순하다.|상품 금액, 차감한 포인트와 결제된 금전적 가치를 개념적으로 구분하기 어렵다.|
+|주문 총액·포인트 사용액·결제액을 구분해 저장|각 값의 의미가 분명하고 주문 당시의 결제 정보를 보존할 수 있다.|현재는 같은 값을 중복 저장하므로 값 사이의 정합성을 관리해야 한다.|
+
+주문 총액, 포인트 사용액과 결제액을 구분해 저장하는 대안을 선택한다. 포인트는 할인 수단이 아니라 결제 수단으로 사용하므로, 현재 전액 포인트 결제 정책에서는 세 값이 서로 같다. Order가 주문 확정 시 포인트 사용액과 주문 총액의 관계를 검증하고 결제액을 계산·기록하여 세 값이 서로 어긋나지 않도록 한다.
+
+### A.5 Stock 모델링 방식
+
+|대안|장점|비용|
+|---|---|---|
+|Product의 단순 수량 필드|별도 타입과 매핑이 없어 구현이 가장 단순하다.|재고의 유효성 검증과 변경 행동이 Product의 다른 책임에 섞이기 쉽다.|
+|Product가 소유하는 Stock Value Object|독립 생명주기를 만들지 않으면서 음수 방지와 수량 변경 규칙을 Stock에 모을 수 있다.|재고만 독립적으로 조회·저장할 수 없으며 Product와 함께 영속화하고 동시성 제어해야 한다.|
+|독립 Stock Entity|재고에 별도 식별자·Repository·생명주기를 부여하고 재고 단위의 조회나 확장에 대응하기 쉽다.|Product와의 관계, 저장소와 생명주기 관리가 추가되며 현재 요구사항에는 독립성이 필요하지 않다.|
+
+Product가 소유하는 Stock Value Object를 선택한다. 현재 재고는 Product 없이 독립적으로 존재하거나 조회되지 않지만, 음수가 될 수 없고 관리자 설정과 주문 차감이라는 행동은 별도 책임으로 표현할 필요가 있기 때문이다.
+
+이 선택은 모델 수를 불필요하게 늘리지 않으면서 재고 규칙을 캡슐화한다. 대신 향후 재고를 독립적으로 잠그거나 창고별 재고처럼 생명주기를 분리해야 한다면 Stock을 Entity로 전환하고 관계와 동시성 제어 방식을 다시 검토한다.
+
+### A.6 Domain Entity와 JPA Entity의 분리 여부
+
+|대안|장점|비용|
+|---|---|---|
+|도메인 모델과 JPA 모델 분리|도메인 모델을 JPA 애너테이션과 영속화 제약에서 분리할 수 있다.|두 모델과 변환 코드가 필요하고 필드·관계 변경 시 양쪽을 함께 관리해야 한다.|
+|Domain Entity를 JPA Entity로 함께 사용|모델과 변환 코드의 중복을 줄이고 도메인 행동과 저장 상태를 한 객체에서 관리할 수 있다.|domain 모델이 JPA 애너테이션과 영속화 방식의 제약에 직접 영향을 받는다.|
+
+현재 프로젝트 규모와 MVP 구현 범위를 고려해 Domain Entity를 JPA Entity로 함께 사용한다. 비즈니스 Entity는 `commerce-api`의 `domain/{feature}`에 두고, `modules/jpa`에는 `BaseEntity`와 공통 JPA 설정만 둔다.
+
+이 선택은 구현과 매핑 비용을 줄이지만 domain을 영속 기술로부터 완전히 분리하지는 못한다. JPA 제약 때문에 도메인 행동을 표현하기 어렵거나 다른 저장 모델이 필요해지면 영속 모델 분리를 다시 검토한다.
+
+### A.7 단일·다중 도메인 유스케이스의 호출 경계
+
+|대안|장점|비용|
+|---|---|---|
+|모든 유스케이스가 Facade를 거침|Controller의 호출 대상과 트랜잭션 시작 위치를 application으로 통일할 수 있다.|단일 도메인의 단순 조회·변경에도 전달 역할만 하는 Facade가 추가될 수 있다.|
+|Controller가 항상 Domain Service를 호출|단일 도메인 흐름은 단순하고 application 계층을 줄일 수 있다.|여러 도메인의 처리 순서와 트랜잭션을 한 곳에서 조율하기 어렵고 Domain Service에 다른 도메인의 책임이 섞일 수 있다.|
+|유스케이스의 협력 범위에 따라 구분|단일 도메인은 짧은 호출 구조를 유지하고 다중 도메인은 Facade가 순서와 트랜잭션을 조율할 수 있다.|Controller의 호출 대상과 트랜잭션 시작 위치가 유스케이스에 따라 달라진다.|
+
+유스케이스의 협력 범위에 따라 호출 경계를 구분한다. 단일 도메인 기능은 Controller가 Domain Service를 직접 호출하고 Domain Service가 트랜잭션을 시작한다. 여러 도메인이 협력하는 기능은 Controller가 Facade를 호출하고 Facade가 전체 트랜잭션과 처리 순서를 관리한다.
+
+Facade 안에서 호출되는 Domain Service는 기본 전파 속성 `REQUIRED`로 Facade의 트랜잭션에 참여한다. 이 선택으로 단순 기능의 불필요한 계층을 줄일 수 있지만 호출 경계가 일관되지 않는 비용이 있으므로, 구현 과정에서 구분 기준이 반복적으로 모호해지면 모든 유스케이스에 application 계층을 두는 방안을 다시 검토한다.
+
+### A.8 주문의 중복 상품 품목 처리
+
+|대안|장점|비용|
+|---|---|---|
+|중복 상품 품목 거절|요청과 저장 구조가 단순하고 클라이언트가 중복을 직접 수정하게 할 수 있다.|같은 상품이 여러 번 담긴 요청을 처리하지 못하며 클라이언트가 품목을 정규화해야 한다.|
+|같은 상품의 수량 합산|클라이언트 입력 순서와 중복 여부에 관계없이 Product당 하나의 OrderItem을 유지할 수 있다.|서버에 그룹화와 합산 로직이 필요하고 수량 합산 시 숫자 범위를 검증해야 한다.|
+
+같은 Product의 품목은 수량을 합산하는 대안을 선택한다. 요청을 합산하기 전에 각 품목의 수량이 1 이상인지 먼저 검증하여 음수나 0이 다른 수량에 의해 상쇄되지 않도록 한다. 이후 `productId`별로 수량을 합산하고, 표현 범위를 넘으면 `NUMERIC_OVERFLOW`로 거절한다.
+
+합산한 결과는 Product당 하나의 OrderItem으로 저장하고, 주문 생성 시점의 Product 가격으로 품목 금액과 주문 총액을 계산한다. 이 선택은 클라이언트 입력을 유연하게 수용하지만 서버의 정규화 책임과 경계값 테스트 비용을 추가한다.
