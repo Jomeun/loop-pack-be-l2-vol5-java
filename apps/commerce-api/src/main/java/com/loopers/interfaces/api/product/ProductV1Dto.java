@@ -9,9 +9,9 @@ public class ProductV1Dto {
         Long brandId,
         String brandName,
         String name,
-        long price,
-        long likeCount,
-        long stockQuantity
+        Long price,
+        Long likeCount,
+        Long stockQuantity
     ) {
         public static ProductResponse from(ProductQueryResult result) {
             return new ProductResponse(

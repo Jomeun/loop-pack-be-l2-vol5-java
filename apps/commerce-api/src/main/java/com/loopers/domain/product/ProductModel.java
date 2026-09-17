@@ -40,18 +40,18 @@ public class ProductModel extends BaseEntity {
 
     protected ProductModel() {}
 
-    private ProductModel(Long brandId, String name, long price) {
+    private ProductModel(Long brandId, String name, Long price) {
         this.brandId = brandId;
         this.name = validateName(name);
         this.price = validatePrice(price);
         this.stock = Stock.of(0L);
     }
 
-    public static ProductModel create(Long brandId, String name, long price) {
+    public static ProductModel create(Long brandId, String name, Long price) {
         return new ProductModel(brandId, name, price);
     }
 
-    public void update(String newName, long newPrice) {
+    public void update(String newName, Long newPrice) {
         String validatedName = validateName(newName);
         Money validatedPrice = validatePrice(newPrice);
 
@@ -60,7 +60,10 @@ public class ProductModel extends BaseEntity {
     }
 
     /** 최종 수량으로 재고를 변경한다. */
-    public StockChange changeStock(long finalQuantity) {
+    public StockChange changeStock(Long finalQuantity) {
+        if (finalQuantity == null) {
+            throw new CoreException(ErrorType.INVALID_STOCK_QUANTITY);
+        }
         return stock.change(finalQuantity);
     }
 
@@ -87,8 +90,8 @@ public class ProductModel extends BaseEntity {
         return trimmed;
     }
 
-    private static Money validatePrice(long price) {
-        if (price < MIN_PRICE || price > MAX_PRICE) {
+    private static Money validatePrice(Long price) {
+        if (price == null || price < MIN_PRICE || price > MAX_PRICE) {
             throw new CoreException(ErrorType.INVALID_PRODUCT_PRICE);
         }
         return Money.of(price);

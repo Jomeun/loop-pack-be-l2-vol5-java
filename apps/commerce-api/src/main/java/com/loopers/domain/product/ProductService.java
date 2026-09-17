@@ -42,7 +42,7 @@ public class ProductService {
 
     /** Brand 의 존재와 삭제 여부를 읽어 확인하지만 Brand 를 변경하지 않는다. */
     @Transactional
-    public ProductModel create(Long brandId, String name, long price) {
+    public ProductModel create(Long brandId, String name, Long price) {
         brandRepository.findActive(brandId)
             .orElseThrow(() -> new CoreException(ErrorType.BRAND_NOT_FOUND));
 
@@ -51,7 +51,7 @@ public class ProductService {
 
     /** 브랜드 관계는 바꾸지 않는다. */
     @Transactional
-    public ProductModel update(Long productId, String name, long price) {
+    public ProductModel update(Long productId, String name, Long price) {
         ProductModel product = findActive(productId);
         product.update(name, price);
         return productRepository.save(product);
@@ -66,7 +66,7 @@ public class ProductService {
 
     /** quantity 는 증감량이 아니라 변경 후의 최종 수량이다. */
     @Transactional
-    public ProductModel changeStock(Long productId, long finalQuantity) {
+    public ProductModel changeStock(Long productId, Long finalQuantity) {
         ProductModel product = findActive(productId);
 
         StockChange change = product.changeStock(finalQuantity);
