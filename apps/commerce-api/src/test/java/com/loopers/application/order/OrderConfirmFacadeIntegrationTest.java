@@ -149,6 +149,30 @@ class OrderConfirmFacadeIntegrationTest {
 
             assertThat(balanceOf(user)).isZero();
         }
+
+        @DisplayName("주문 생성 뒤 상품 가격이 올라도 확정은 주문 당시 단가로 계산한 4,000 만 차감한다.")
+        @Test
+        void chargesSnapshotPriceAfterPriceChange() {
+            UserModel user = userFixture.createUserWithPoint();
+            pointService.charge(user.getId(), 10_000L);
+            ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
+            OrderModel order = orderService.create(user.getId(),
+                List.of(new OrderItemCommand(shirt.getId(), 2L)));
+
+            productService.update(shirt.getId(), "티셔츠", 5_000L);
+
+            OrderInfo confirmed = orderConfirmFacade.confirm(user.getId(), order.getId());
+
+            OrderModel saved = orderJpaRepository.findById(order.getId()).orElseThrow();
+            assertAll(
+                () -> assertThat(confirmed.status()).isEqualTo(OrderStatus.CONFIRMED.name()),
+                () -> assertThat(confirmed.orderTotal()).isEqualTo(4_000L),
+                () -> assertThat(confirmed.usedPointAmount()).isEqualTo(4_000L),
+                () -> assertThat(confirmed.paymentAmount()).isEqualTo(4_000L),
+                () -> assertThat(saved.getStatus()).isEqualTo(OrderStatus.CONFIRMED),
+                () -> assertThat(balanceOf(user)).isEqualTo(6_000L)
+            );
+        }
     }
 
     @DisplayName("확정 거절")
