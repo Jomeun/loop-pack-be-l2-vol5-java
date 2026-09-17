@@ -7,6 +7,7 @@ import com.loopers.domain.order.OrderStatus;
 import com.loopers.domain.point.PointChangeCause;
 import com.loopers.domain.point.PointService;
 import com.loopers.domain.product.ProductModel;
+import com.loopers.domain.product.ProductService;
 import com.loopers.domain.product.StockChangeCause;
 import com.loopers.domain.user.UserModel;
 import com.loopers.fixture.ProductFixture;
@@ -42,6 +43,8 @@ class OrderConfirmFacadeIntegrationTest {
     private OrderService orderService;
     @Autowired
     private PointService pointService;
+    @Autowired
+    private ProductService productService;
     @Autowired
     private UserFixture userFixture;
     @Autowired
@@ -206,6 +209,36 @@ class OrderConfirmFacadeIntegrationTest {
                 () -> assertThat(stockOf(pants)).isEqualTo(1L),
                 () -> assertThat(stockHistoryJpaRepository.findAll()).noneMatch(
                     history -> history.getCause() == StockChangeCause.ORDER_DEDUCTION)
+            );
+        }
+
+        @DisplayName("주문 생성 뒤 관리자가 재고를 줄이면 생성 당시가 아닌 확정 시점의 재고로 판단해 INSUFFICIENT_STOCK 으로 거절한다.")
+        @Test
+        void rejectsWhenStockDroppedAfterDraft() {
+            UserModel user = userFixture.createUserWithPoint();
+            pointService.charge(user.getId(), 10_000L);
+            ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
+            OrderModel order = orderService.create(user.getId(),
+                List.of(new OrderItemCommand(shirt.getId(), 2L)));
+
+            productService.changeStock(shirt.getId(), 1L);
+
+            assertThatThrownBy(() -> orderConfirmFacade.confirm(user.getId(), order.getId()))
+                .isInstanceOf(CoreException.class)
+                .extracting("errorType")
+                .isEqualTo(ErrorType.INSUFFICIENT_STOCK);
+
+            assertAll(
+                () -> assertThat(orderJpaRepository.findById(order.getId()).orElseThrow().getStatus())
+                    .isEqualTo(OrderStatus.DRAFT),
+                () -> assertThat(balanceOf(user)).isEqualTo(10_000L),
+                () -> assertThat(stockOf(shirt)).isEqualTo(1L),
+                () -> assertThat(stockHistoryJpaRepository.findAll()).noneMatch(
+                    history -> history.getCause() == StockChangeCause.ORDER_DEDUCTION),
+                () -> assertThat(pointHistoryJpaRepository.findAll()).noneMatch(
+                    history -> history.getCause() == PointChangeCause.ORDER_USE),
+                () -> assertThat(stockHistoryJpaRepository.findAll().stream()
+                    .filter(history -> history.getCause() == StockChangeCause.ADMIN_CHANGE).toList()).hasSize(1)
             );
         }
 
