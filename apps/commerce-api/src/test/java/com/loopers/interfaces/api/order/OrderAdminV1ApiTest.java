@@ -1,4 +1,4 @@
-package com.loopers.interfaces.api.admin;
+package com.loopers.interfaces.api.order;
 
 import com.loopers.application.order.OrderConfirmFacade;
 import com.loopers.domain.order.OrderItemCommand;
@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @WithMockUser(roles = "ADMIN")
-class AdminOrderV1ApiTest {
+class OrderAdminV1ApiTest {
 
     private static final String ENDPOINT = "/api-admin/v1/orders";
 

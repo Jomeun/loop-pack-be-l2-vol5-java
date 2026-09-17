@@ -1,8 +1,8 @@
-package com.loopers.interfaces.api.admin;
+package com.loopers.interfaces.api.brand;
 
 import com.loopers.domain.brand.BrandModel;
 
-public class AdminBrandV1Dto {
+public class BrandAdminV1Dto {
 
     public record BrandSaveRequest(String name) {
     }

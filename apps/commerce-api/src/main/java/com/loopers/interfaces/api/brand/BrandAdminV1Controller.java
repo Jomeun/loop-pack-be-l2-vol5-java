@@ -1,4 +1,4 @@
-package com.loopers.interfaces.api.admin;
+package com.loopers.interfaces.api.brand;
 
 import com.loopers.domain.brand.BrandModel;
 import com.loopers.domain.brand.BrandService;
@@ -23,45 +23,45 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 @RestController
 @RequestMapping("/api-admin/v1/brands")
-public class AdminBrandV1Controller implements AdminBrandV1ApiSpec {
+public class BrandAdminV1Controller implements BrandAdminV1ApiSpec {
 
     private final BrandService brandService;
 
     @GetMapping
     @Override
-    public ApiResponse<PageResponse<AdminBrandV1Dto.AdminBrandResponse>> getBrands(
+    public ApiResponse<PageResponse<BrandAdminV1Dto.AdminBrandResponse>> getBrands(
         @RequestParam(value = "page", required = false) Integer page,
         @RequestParam(value = "size", required = false) Integer size,
         @RequestParam(value = "sort", required = false) String sort
     ) {
         PageResult<BrandModel> result = brandService.getBrands(PageCommand.of(page, size), ListSort.from(sort));
-        return ApiResponse.success(PageResponse.of(result, AdminBrandV1Dto.AdminBrandResponse::from));
+        return ApiResponse.success(PageResponse.of(result, BrandAdminV1Dto.AdminBrandResponse::from));
     }
 
     @PostMapping
     @Override
-    public ResponseEntity<ApiResponse<AdminBrandV1Dto.AdminBrandResponse>> create(
-        @RequestBody(required = false) AdminBrandV1Dto.BrandSaveRequest request
+    public ResponseEntity<ApiResponse<BrandAdminV1Dto.AdminBrandResponse>> create(
+        @RequestBody(required = false) BrandAdminV1Dto.BrandSaveRequest request
     ) {
         BrandModel created = brandService.create(nameOf(request));
         return ResponseEntity.status(HttpStatus.CREATED)
-            .body(ApiResponse.success(AdminBrandV1Dto.AdminBrandResponse.from(created)));
+            .body(ApiResponse.success(BrandAdminV1Dto.AdminBrandResponse.from(created)));
     }
 
     @GetMapping("/{brandId}")
     @Override
-    public ApiResponse<AdminBrandV1Dto.AdminBrandResponse> getBrand(@PathVariable(value = "brandId") Long brandId) {
-        return ApiResponse.success(AdminBrandV1Dto.AdminBrandResponse.from(brandService.getBrand(brandId)));
+    public ApiResponse<BrandAdminV1Dto.AdminBrandResponse> getBrand(@PathVariable(value = "brandId") Long brandId) {
+        return ApiResponse.success(BrandAdminV1Dto.AdminBrandResponse.from(brandService.getBrand(brandId)));
     }
 
     @PutMapping("/{brandId}")
     @Override
-    public ApiResponse<AdminBrandV1Dto.AdminBrandResponse> update(
+    public ApiResponse<BrandAdminV1Dto.AdminBrandResponse> update(
         @PathVariable(value = "brandId") Long brandId,
-        @RequestBody(required = false) AdminBrandV1Dto.BrandSaveRequest request
+        @RequestBody(required = false) BrandAdminV1Dto.BrandSaveRequest request
     ) {
         BrandModel updated = brandService.update(brandId, nameOf(request));
-        return ApiResponse.success(AdminBrandV1Dto.AdminBrandResponse.from(updated));
+        return ApiResponse.success(BrandAdminV1Dto.AdminBrandResponse.from(updated));
     }
 
     @DeleteMapping("/{brandId}")
@@ -72,7 +72,7 @@ public class AdminBrandV1Controller implements AdminBrandV1ApiSpec {
     }
 
     /** 본문이나 name 이 없는 요청도 브랜드명 규칙으로 판단한다. */
-    private static String nameOf(AdminBrandV1Dto.BrandSaveRequest request) {
+    private static String nameOf(BrandAdminV1Dto.BrandSaveRequest request) {
         return request != null ? request.name() : null;
     }
 }

@@ -1,4 +1,4 @@
-package com.loopers.interfaces.api.admin;
+package com.loopers.interfaces.api.product;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loopers.domain.brand.BrandModel;
@@ -37,7 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @WithMockUser(roles = "ADMIN")
-class AdminProductV1ApiTest {
+class ProductAdminV1ApiTest {
 
     private static final String ENDPOINT = "/api-admin/v1/products";
 
@@ -180,13 +180,13 @@ class AdminProductV1ApiTest {
                 .andExpect(jsonPath("$.meta.errorCode").value("INVALID_PRODUCT_PRICE"));
         }
 
-        @DisplayName("brandId 가 없으면 404 BRAND_NOT_FOUND 로 거절한다.")
+        @DisplayName("brandId 가 없으면 400 INVALID_REQUEST 로 거절한다.")
         @Test
         void rejectsMissingBrandId() throws Exception {
             mockMvc.perform(post(ENDPOINT).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                     .content(json(body("name", "운동화", "price", 10_000L))))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.meta.errorCode").value("BRAND_NOT_FOUND"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.meta.errorCode").value("INVALID_REQUEST"));
         }
     }
 
@@ -257,6 +257,17 @@ class AdminProductV1ApiTest {
 
             mockMvc.perform(put(ENDPOINT + "/" + deleted.getId()).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                     .content(json(body("name", "새이름", "price", 20_000L))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.meta.errorCode").value("PRODUCT_NOT_FOUND"));
+        }
+
+        @DisplayName("없는 상품에 price 가 빠진 요청은 값 판단보다 먼저 404 PRODUCT_NOT_FOUND 로 거절한다.")
+        @Test
+        void rejectsUnknownProductBeforeValidatingPrice() throws Exception {
+            ProductModel deleted = productFixture.createDeletedProduct("단종 운동화", 10_000L, 3L);
+
+            mockMvc.perform(put(ENDPOINT + "/" + deleted.getId()).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body("name", "새이름"))))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.meta.errorCode").value("PRODUCT_NOT_FOUND"));
         }
@@ -348,6 +359,17 @@ class AdminProductV1ApiTest {
 
             mockMvc.perform(put(ENDPOINT + "/" + deleted.getId() + "/stock").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                     .content(json(body("quantity", 1L))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.meta.errorCode").value("PRODUCT_NOT_FOUND"));
+        }
+
+        @DisplayName("없는 상품에 quantity 가 빠진 요청은 값 판단보다 먼저 404 PRODUCT_NOT_FOUND 로 거절한다.")
+        @Test
+        void rejectsUnknownProductBeforeValidatingQuantity() throws Exception {
+            ProductModel deleted = productFixture.createDeletedProduct("단종 운동화", 10_000L, 3L);
+
+            mockMvc.perform(put(ENDPOINT + "/" + deleted.getId() + "/stock").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                    .content("{}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.meta.errorCode").value("PRODUCT_NOT_FOUND"));
         }

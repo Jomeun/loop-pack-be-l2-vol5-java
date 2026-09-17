@@ -1,4 +1,4 @@
-package com.loopers.interfaces.api.admin;
+package com.loopers.interfaces.api;
 
 import com.loopers.domain.user.UserModel;
 import com.loopers.fixture.UserFixture;

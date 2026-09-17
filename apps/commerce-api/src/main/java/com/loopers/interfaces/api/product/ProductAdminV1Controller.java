@@ -1,4 +1,4 @@
-package com.loopers.interfaces.api.admin;
+package com.loopers.interfaces.api.product;
 
 import com.loopers.domain.common.ListSort;
 import com.loopers.domain.common.PageCommand;
@@ -26,42 +26,42 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 @RestController
 @RequestMapping("/api-admin/v1/products")
-public class AdminProductV1Controller implements AdminProductV1ApiSpec {
+public class ProductAdminV1Controller implements ProductAdminV1ApiSpec {
 
     private final ProductService productService;
 
     @GetMapping
     @Override
-    public ApiResponse<PageResponse<AdminProductV1Dto.AdminProductResponse>> getProducts(
+    public ApiResponse<PageResponse<ProductAdminV1Dto.AdminProductResponse>> getProducts(
         @RequestParam(value = "page", required = false) Integer page,
         @RequestParam(value = "size", required = false) Integer size,
         @RequestParam(value = "sort", required = false) String sort
     ) {
         PageResult<ProductQueryResult> result =
             productService.getAllProducts(PageCommand.of(page, size), ListSort.from(sort));
-        return ApiResponse.success(PageResponse.of(result, AdminProductV1Dto.AdminProductResponse::from));
+        return ApiResponse.success(PageResponse.of(result, ProductAdminV1Dto.AdminProductResponse::from));
     }
 
     @PostMapping
     @Override
-    public ResponseEntity<ApiResponse<AdminProductV1Dto.AdminProductResponse>> create(
-        @RequestBody(required = false) AdminProductV1Dto.ProductCreateRequest request
+    public ResponseEntity<ApiResponse<ProductAdminV1Dto.AdminProductResponse>> create(
+        @RequestBody(required = false) ProductAdminV1Dto.ProductCreateRequest request
     ) {
-        AdminProductV1Dto.ProductCreateRequest body = request != null
+        ProductAdminV1Dto.ProductCreateRequest body = request != null
             ? request
-            : new AdminProductV1Dto.ProductCreateRequest(null, null, null);
+            : new ProductAdminV1Dto.ProductCreateRequest(null, null, null);
         if (body.brandId() == null) {
-            throw new CoreException(ErrorType.BRAND_NOT_FOUND);
+            throw new CoreException(ErrorType.INVALID_REQUEST);
         }
 
-        ProductModel created = productService.create(body.brandId(), body.name(), priceOf(body.price()));
+        ProductModel created = productService.create(body.brandId(), body.name(), body.price());
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.success(detailOf(created.getId())));
     }
 
     @GetMapping("/{productId}")
     @Override
-    public ApiResponse<AdminProductV1Dto.AdminProductResponse> getProduct(
+    public ApiResponse<ProductAdminV1Dto.AdminProductResponse> getProduct(
         @PathVariable(value = "productId") Long productId
     ) {
         return ApiResponse.success(detailOf(productId));
@@ -69,14 +69,14 @@ public class AdminProductV1Controller implements AdminProductV1ApiSpec {
 
     @PutMapping("/{productId}")
     @Override
-    public ApiResponse<AdminProductV1Dto.AdminProductResponse> update(
+    public ApiResponse<ProductAdminV1Dto.AdminProductResponse> update(
         @PathVariable(value = "productId") Long productId,
-        @RequestBody(required = false) AdminProductV1Dto.ProductUpdateRequest request
+        @RequestBody(required = false) ProductAdminV1Dto.ProductUpdateRequest request
     ) {
-        AdminProductV1Dto.ProductUpdateRequest body = request != null
+        ProductAdminV1Dto.ProductUpdateRequest body = request != null
             ? request
-            : new AdminProductV1Dto.ProductUpdateRequest(null, null);
-        productService.update(productId, body.name(), priceOf(body.price()));
+            : new ProductAdminV1Dto.ProductUpdateRequest(null, null);
+        productService.update(productId, body.name(), body.price());
         return ApiResponse.success(detailOf(productId));
     }
 
@@ -89,27 +89,15 @@ public class AdminProductV1Controller implements AdminProductV1ApiSpec {
 
     @PutMapping("/{productId}/stock")
     @Override
-    public ApiResponse<AdminProductV1Dto.StockResponse> changeStock(
+    public ApiResponse<ProductAdminV1Dto.StockResponse> changeStock(
         @PathVariable(value = "productId") Long productId,
-        @RequestBody(required = false) AdminProductV1Dto.StockUpdateRequest request
+        @RequestBody(required = false) ProductAdminV1Dto.StockUpdateRequest request
     ) {
-        if (request == null || request.quantity() == null) {
-            throw new CoreException(ErrorType.INVALID_STOCK_QUANTITY);
-        }
-
-        ProductModel changed = productService.changeStock(productId, request.quantity());
-        return ApiResponse.success(AdminProductV1Dto.StockResponse.from(changed));
+        ProductModel changed = productService.changeStock(productId, request != null ? request.quantity() : null);
+        return ApiResponse.success(ProductAdminV1Dto.StockResponse.from(changed));
     }
 
-    private AdminProductV1Dto.AdminProductResponse detailOf(Long productId) {
-        return AdminProductV1Dto.AdminProductResponse.from(productService.getProduct(productId));
-    }
-
-    /** price 가 없는 요청도 상품 가격 규칙으로 판단한다. */
-    private static long priceOf(Long price) {
-        if (price == null) {
-            throw new CoreException(ErrorType.INVALID_PRODUCT_PRICE);
-        }
-        return price;
+    private ProductAdminV1Dto.AdminProductResponse detailOf(Long productId) {
+        return ProductAdminV1Dto.AdminProductResponse.from(productService.getProduct(productId));
     }
 }

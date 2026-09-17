@@ -1,9 +1,9 @@
-package com.loopers.interfaces.api.admin;
+package com.loopers.interfaces.api.product;
 
 import com.loopers.domain.product.ProductModel;
 import com.loopers.domain.product.ProductQueryResult;
 
-public class AdminProductV1Dto {
+public class ProductAdminV1Dto {
 
     public record ProductCreateRequest(Long brandId, String name, Long price) {
     }
@@ -20,8 +20,8 @@ public class AdminProductV1Dto {
         Long brandId,
         String brandName,
         String name,
-        long price,
-        long stockQuantity
+        Long price,
+        Long stockQuantity
     ) {
         public static AdminProductResponse from(ProductQueryResult result) {
             return new AdminProductResponse(
@@ -35,7 +35,7 @@ public class AdminProductV1Dto {
         }
     }
 
-    public record StockResponse(Long productId, long quantity) {
+    public record StockResponse(Long productId, Long quantity) {
         public static StockResponse from(ProductModel product) {
             return new StockResponse(product.getId(), product.getStockQuantity());
         }

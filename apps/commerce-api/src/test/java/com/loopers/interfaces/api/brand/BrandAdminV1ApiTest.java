@@ -1,4 +1,4 @@
-package com.loopers.interfaces.api.admin;
+package com.loopers.interfaces.api.brand;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loopers.domain.brand.BrandModel;
@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @WithMockUser(roles = "ADMIN")
-class AdminBrandV1ApiTest {
+class BrandAdminV1ApiTest {
 
     private static final String ENDPOINT = "/api-admin/v1/brands";
 
