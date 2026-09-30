@@ -65,7 +65,7 @@ flowchart LR
 
 |관계|책임과 핵심 규칙|
 |---|---|
-|Brand–Product|Product는 하나의 Brand에 속한다. BrandService가 삭제되지 않은 Product의 존재 여부를 조회해 전달하면, Brand가 `delete(hasActiveProducts)`에서 삭제 가능 여부를 판단하고 자신의 삭제 상태를 변경한다.|
+|Brand–Product|Product는 하나의 Brand에 속한다. BrandFacade가 삭제되지 않은 Product의 존재 여부를 조회해 전달하면, Brand가 `delete(hasActiveProducts)`에서 삭제 가능 여부를 판단하고 자신의 삭제 상태를 변경한다.|
 |Product–Stock|Product는 Stock Value Object를 소유한다. Stock은 현재 수량을 관리하고 음수 재고를 허용하지 않으며, 관리자 변경과 주문 확정에 필요한 수량 변경 행동을 제공한 뒤 `StockChange`를 반환한다.|
 |Product–StockHistory|StockHistory는 `StockChange`와 변경 원인을 받는 이름 있는 팩토리 메서드로 관리자 재고 변경과 주문 확정의 결과를 기록한다.|
 |User–Like–Product|Like는 User와 Product 사이의 관계를 나타낸다. 같은 사용자가 같은 상품에 만든 Like 관계는 중복될 수 없다.|
@@ -80,9 +80,9 @@ Order는 `DRAFT`와 `CONFIRMED` 상태를 가진다. 주문 생성 시 `DRAFT`�
 
 Order는 주문 총액, 포인트 사용액과 결제액을 구분해 기록한다. 각 금액의 정의와 계산 규칙은 [5.1](./05-api-contract.md#51-공통-계약과-입력-정책)을 따르며, 구분해 저장하는 이유와 비용은 [부록 A.4](./appendix-decisions.md#a4-주문-금액과-결제-정보의-구분)에서 비교한다.
 
-재고·포인트의 유효성이나 주문 상태 전이처럼 모델 자신의 상태로 판단할 수 있는 규칙은 해당 모델이 지킨다. BrandService는 활성 Product 존재 여부를 읽어 Brand에 전달하지만 Product를 변경하지 않으며, 삭제 가능 여부와 상태 변경은 Brand가 담당한다. OrderConfirmFacade는 Order·Point·Product처럼 여러 비즈니스 애그리게잇의 상태 변경을 조율하되 업무 규칙은 각 모델에 맡긴다. Brand 삭제 책임을 이렇게 배치한 근거는 [부록 A.9](./appendix-decisions.md#a9-brand-삭제-규칙의-위치)에서 비교한다.
+재고·포인트의 유효성이나 주문 상태 전이처럼 모델 자신의 상태로 판단할 수 있는 규칙은 해당 모델이 지킨다. BrandFacade는 활성 Product 존재 여부를 읽어 Brand에 전달하지만 Product를 변경하지 않으며, 삭제 가능 여부와 상태 변경은 Brand가 담당한다. OrderConfirmFacade는 Order·Point·Product처럼 여러 비즈니스 애그리게잇의 상태 변경을 조율하되 업무 규칙은 각 모델에 맡긴다. Brand 삭제 책임을 이렇게 배치한 근거는 [부록 A.9](./appendix-decisions.md#a9-brand-삭제-규칙의-위치)에서 비교한다.
 
-상품 목록·상세 조회는 `ProductService`가 `ProductQueryRepository`를 호출해 `ProductQueryResult`를 반환한다. 이 결과에는 Product가 소유한 Stock의 현재 수량도 포함한다. Product·Brand 조인과 Like 집계는 한 번의 읽기 전용 쿼리로 처리하며, `brandName`과 `likeCount`는 조회 결과의 스칼라 값이지 ProductModel의 상태가 아니다. 여러 테이블을 조회하더라도 모델의 행동이나 상태 변경을 조율하지 않으므로, 별도의 Application Service(Facade)를 두지 않는다. 이 경계의 대안과 비용은 [부록 A.11](./appendix-decisions.md#a11-읽기-전용-조합-조회의-호출-경계)에서 비교한다.
+상품 목록·상세 조회는 `ProductFacade`가 읽기 전용 트랜잭션에서 `ProductQueryRepository`를 호출해 `ProductQueryResult`를 반환한다. 이 결과에는 Product가 소유한 Stock의 현재 수량도 포함한다. Product·Brand 조인과 Like 집계는 한 번의 읽기 전용 쿼리로 처리하며, `brandName`과 `likeCount`는 조회 결과의 스칼라 값이지 ProductModel의 상태가 아니다. 조회 결과를 완성하는 책임은 QueryRepository에 두되 API 진입점과 트랜잭션 경계는 ProductFacade로 통일한다. 이 경계의 대안과 비용은 [부록 A.11](./appendix-decisions.md#a11-읽기-전용-조합-조회의-호출-경계)에서 비교한다.
 
 ## 3.3 도메인 클래스 설계
 
@@ -204,6 +204,12 @@ classDiagram
         +calculateAmount() Money
     }
 
+    class OrderService {
+        <<Domain Service>>
+        +mergeQuantities(commands) Map
+        +createDraft(userId, quantities, productsById) OrderModel
+    }
+
     BrandModel "1" --> "0..*" ProductModel : classifies
     ProductModel "1" *-- "1" Stock : contains
     Stock ..> StockChange : returns
@@ -218,13 +224,15 @@ classDiagram
     UserModel "1" --> "0..*" OrderModel : owns
     OrderModel "1" *-- "1..*" OrderItemModel : contains
     ProductModel "1" --> "0..*" OrderItemModel : referencedBy
+    OrderService ..> ProductModel : reads
+    OrderService ..> OrderModel : creates
     StockHistoryModel "0..*" --> "0..1" OrderModel : causedBy
     PointHistoryModel "0..*" --> "0..1" OrderModel : causedBy
 ```
 
 *그림 5. 주요 도메인 모델의 상태·행동과 클래스 관계*
 
-BrandModel은 BrandService가 조회한 활성 Product 존재 여부를 받아 삭제 가능 조건을 직접 판단한다. ProductModel은 Stock의 행동을 통해 재고 규칙을 지키며, 외부 객체가 수량을 직접 변경하지 못하게 한다. Stock은 수량 변경 전에 유효성을 검사하고 자신의 상태를 바꾼 뒤 불변인 StockChange를 반환한다. PointModel도 잔액 변경 전후 상태를 불변인 PointChange로 반환한다. Money는 원 단위 금액의 덧셈과 수량 곱셈을 담당하고 결과가 `long` 범위를 넘는지 검사하며, 연산 결과를 새 Money로 반환한다. OrderItemModel은 Money로 품목 금액을 계산하고, OrderModel은 이를 합산해 주문 총액을 관리한다. OrderModel은 포인트 사용액의 원화 환산 값이 주문 총액과 같은지 검증한 뒤 결제액과 상태를 변경한다. `DRAFT` 상태에서는 포인트 사용액과 결제액이 없으며, `CONFIRMED`로 전이할 때 기록한다.
+BrandModel은 BrandFacade가 조회한 활성 Product 존재 여부를 받아 삭제 가능 조건을 직접 판단한다. ProductModel은 Stock의 행동을 통해 재고 규칙을 지키며, 외부 객체가 수량을 직접 변경하지 못하게 한다. Stock은 수량 변경 전에 유효성을 검사하고 자신의 상태를 바꾼 뒤 불변인 StockChange를 반환한다. PointModel도 잔액 변경 전후 상태를 불변인 PointChange로 반환한다. Money는 원 단위 금액의 덧셈과 수량 곱셈을 담당하고 결과가 `long` 범위를 넘는지 검사하며, 연산 결과를 새 Money로 반환한다. OrderItemModel은 Money로 품목 금액을 계산하고, OrderModel은 이를 합산해 주문 총액을 관리한다. OrderService는 요청 순서를 유지하며 중복 상품 수량을 합치고, OrderFacade가 존재와 활성 상태를 확인해 준비한 상품의 주문 시점 가격으로 OrderItem과 초안 Order를 만든다. OrderModel은 포인트 사용액의 원화 환산 값이 주문 총액과 같은지 검증한 뒤 결제액과 상태를 변경한다. `DRAFT` 상태에서는 포인트 사용액과 결제액이 없으며, `CONFIRMED`로 전이할 때 기록한다.
 
 LikeModel은 UserModel과 ProductModel의 중복될 수 없는 관계를 표현한다. StockHistoryModel과 PointHistoryModel은 변경 결과를 받는 이름 있는 팩토리 메서드로 생성되어 필드 구성 규칙을 한곳에 모은다. 호출자는 관리자 변경·충전·주문 사용과 같은 유스케이스의 원인을 선택하고 생성된 History를 저장한다. 두 History의 `orderId`는 주문 확정으로 생성된 경우에만 존재하며, 관리자 재고 변경과 포인트 충전으로 생성된 이력에는 존재하지 않는다.
 

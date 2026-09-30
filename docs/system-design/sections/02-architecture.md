@@ -27,59 +27,62 @@ feature-first는 한 기능과 관련된 코드를 가까운 위치에 모을 �
 
 ## 2.2 레이어별 역할과 주요 구성 요소
 
-각 레이어의 책임과 해당 레이어에 배치하는 주요 구성 요소는 다음과 같다. 여러 비즈니스 애그리게잇의 변경을 조율하는 Application Service는 이 프로젝트에서 `{UseCase}Facade`로 명명한다.
+각 레이어의 책임과 해당 레이어에 배치하는 주요 구성 요소는 다음과 같다. 일반적인 API 유스케이스의 Application Service는 `{Domain}Facade`, 별도 처리 흐름과 변경 범위가 분명한 유스케이스는 `{UseCase}Facade`로 명명한다.
 
 |계층|역할|주요 구성 요소|
 |---|---|---|
 |interfaces|고객·관리자의 요청을 입력으로 변환하고, 처리 결과와 예외를 HTTP 응답으로 변환한다.|고객·관리자 Controller, 요청·응답 DTO, API 명세, 예외 응답 처리|
-|application|여러 비즈니스 애그리게잇의 상태 변경을 하나의 유스케이스에서 함께 조율하고 전체 트랜잭션 경계를 관리한다. Facade는 필요한 객체를 조회해 Entity 또는 Domain Service의 행동을 호출하며, 업무 규칙을 직접 구현하지 않는다.|Facade, 입력·결과 모델|
-|domain|Entity와 Value Object는 상태와 업무 규칙을 표현하고 스스로 유효성을 지킨다. Domain Service는 하나의 주된 애그리게잇을 변경하는 유스케이스와 해당 트랜잭션 경계를 담당한다. 명령에 필요한 다른 애그리게잇의 상태를 읽을 수 있지만 변경하지 않으며, 하나의 QueryRepository가 완성된 읽기 전용 결과를 반환하는 조회도 담당할 수 있다. 필요한 Repository 인터페이스와 조회 결과 계약도 domain에 선언한다.|Entity, Value Object, Domain Service, Repository·QueryRepository 인터페이스, QueryResult|
+|application|모든 API 유스케이스의 진입점과 트랜잭션 경계를 관리한다. Facade는 Repository로 객체를 조회·저장하고 Entity·Value Object 또는 필요한 Domain Service의 행동을 호출하며, 업무 규칙을 직접 구현하지 않는다.|Facade, 입력·결과 모델|
+|domain|Entity와 Value Object는 상태와 업무 규칙을 표현하고 스스로 유효성을 지킨다. 어느 한 객체에 자연스럽게 둘 수 없는 실제 도메인 규칙만 Domain Service가 담당한다. Repository·QueryRepository 인터페이스와 조회 결과 계약도 domain에 선언한다.|Entity, Value Object, Domain Service, Repository·QueryRepository 인터페이스, QueryResult|
 |infrastructure|domain이 선언한 저장소 인터페이스를 JPA 등 구체적인 저장 기술로 구현한다.|Repository 구현체, Spring Data JPA Repository|
 |support|공통 오류 처리 등 애플리케이션 전반에서 사용하는 지원 코드를 제공한다.|공통 예외, 오류 타입|
 
-이 문서의 Domain Service는 순수 규칙 객체에 한정되지 않는다. 여러 도메인 객체의 정보가 필요한 업무 판단은 우선 Entity·Value Object에 둘 수 있는지 확인하고, 어느 하나가 책임지기 어려울 때 Domain Service에 둔다. 다른 객체를 참조한다는 이유만으로 규칙을 Service로 옮기지는 않는다.
+Domain Service는 기본적으로 Repository 조회·저장, API 처리 순서, 응답 조립과 트랜잭션 경계를 담당하지 않는다. 여러 도메인 객체의 정보가 필요한 업무 판단은 우선 Entity·Value Object에 둘 수 있는지 확인하고, 어느 하나가 책임지기 어려울 때만 Domain Service에 둔다. Repository 조회 자체가 도메인 판단의 일부이고 Facade가 객체나 값으로 준비해 전달하기 어려운 경우에는 비용과 대안을 먼저 검토한 뒤 예외를 둘 수 있지만, 현재 그런 예외는 없다. 현재 `OrderService`는 중복 주문 품목의 수량을 안전하게 합치고 Facade가 존재와 활성 상태를 확인한 상품의 가격으로 초안 주문을 만드는 규칙만 담당한다.
+
+실습 템플릿으로 제공된 `example` 패키지는 현재 Commerce API의 설계·리팩터링 범위에서 제외한다. 아래 Facade와 트랜잭션 원칙은 브랜드·상품·좋아요·포인트·주문과 공통 요청자 식별 흐름에 적용한다.
 
 비즈니스 Domain Entity와 JPA Entity는 기본적으로 `{Domain}Model` 하나로 사용하며 `commerce-api`의 `domain/{feature}`에 배치한다. 두 모델을 분리할 필요가 생기면 해당 모델만 `{Domain}JpaEntity`로 분리해 infrastructure에 둔다. `modules/jpa`에는 비즈니스 Entity를 두지 않고 `BaseEntity`와 공통 JPA 설정만 둔다. 분리 판단 사례와 선택에 따른 비용은 [부록 A.6](./appendix-decisions.md#a6-domain-entity와-jpa-entity의-분리-여부)에서 비교한다.
 
-읽기 전용 조회와 하나의 주된 애그리게잇만 변경하는 명령은 Controller가 Domain Service를 직접 호출한다. Domain Service는 상품 등록을 위한 Brand 확인, 좋아요 등록을 위한 Product 확인, Brand 삭제를 위한 활성 Product 존재 여부처럼 명령에 필요한 다른 애그리게잇의 상태를 읽을 수 있지만 해당 애그리게잇을 변경하지 않는다. 여러 비즈니스 애그리게잇의 상태를 하나의 트랜잭션에서 함께 변경해야 할 때 Facade를 사용한다.
+모든 Controller는 application의 Facade만 호출한다. 조회와 상태 변경 모두 Facade가 domain의 Repository 인터페이스를 직접 사용하며, Repository 호출을 중계하기 위한 Domain Service를 두지 않는다.
 
 ```text
 Controller
-    → Domain Service @Transactional
-        ├→ 다른 애그리게잇 Repository 읽기
-        └→ 주된 애그리게잇 Repository 조회·저장
+    → Facade @Transactional
+        ├→ Repository 인터페이스로 객체 조회·저장
+        ├→ Entity·Value Object 행동 호출
+        └→ 필요한 경우 순수 Domain Service 호출
 ```
 
 브랜드명·좋아요 수·현재 재고 수량을 포함한 상품 목록·상세처럼 여러 값을 조합하더라도, 하나의 조회 포트가 완성된 읽기 전용 결과를 반환하고 도메인 행동을 조율하지 않는다면 다음과 같이 처리한다.
 
 ```text
 Controller
-    → Domain Service @Transactional(readOnly = true)
+    → Facade @Transactional(readOnly = true)
         → QueryRepository
             → QueryResult
 ```
 
-`ProductService`는 `ProductQueryRepository`가 반환한 `ProductQueryResult`를 그대로 조회 계약으로 사용한다. `BrandService`는 Product 존재 여부를 읽고 Brand만 변경하며, `OrderService`는 Product 정보로 Order를 생성하되 Product를 변경하지 않는다. 반면 주문 확정은 Order·Point·Product의 상태를 함께 변경하므로 `OrderConfirmFacade`가 조율한다.
+`ProductFacade`는 `ProductQueryRepository`가 반환한 `ProductQueryResult`를 그대로 조회 계약으로 사용한다. `BrandFacade`는 Product 존재 여부를 읽어 Brand에 전달하고 Brand만 변경한다. `OrderFacade`는 요청한 Product가 모두 존재하고 활성 상태인지 확인한 뒤 준비된 객체를 순수 Domain Service인 `OrderService`에 전달하고, 주문 품목 구성 규칙을 맡긴 뒤 Order를 저장한다. 주문 확정은 별도 처리 흐름에서 Order·Point·Product의 상태를 함께 변경하므로 `OrderConfirmFacade`가 조율한다.
 
-여러 비즈니스 애그리게잇을 함께 변경하는 유스케이스는 Facade가 전체 처리 순서를 조율한다. Facade는 Domain Service를 반드시 거치지 않고 Repository 인터페이스로 객체를 조회·저장한 뒤 Entity 또는 Domain Service의 행동을 호출할 수 있다.
+Facade는 Domain Service를 반드시 거치지 않는다. Entity·Value Object가 스스로 지킬 수 있는 규칙은 해당 객체의 행동을 직접 호출하고, 여러 객체에 걸친 실제 도메인 규칙이 있을 때만 Domain Service를 호출한다. Facade가 다른 Facade를 호출하지 않으며, 여러 Aggregate가 협력하는 별도 흐름은 해당 흐름을 책임지는 `{UseCase}Facade`가 필요한 Repository와 Domain Service에 직접 의존한다.
 
 ```text
 Controller
     → Facade @Transactional
         ├→ Repository 인터페이스로 객체 조회·저장
         ├→ Entity 행동 호출
-        └→ Domain Service @Transactional 호출
+        └→ 필요한 Domain Service 호출
 ```
 
-Facade가 여러 비즈니스 애그리게잇의 변경을 조율하는 경우 Facade가 전체 트랜잭션을 시작한다. Facade 안에서 호출된 Domain Service의 `@Transactional`은 기본 전파 속성인 `REQUIRED`에 따라 Facade가 시작한 트랜잭션에 참여하므로 별도의 트랜잭션으로 분리되거나 충돌하지 않는다. Domain Service가 Controller에서 직접 호출되는 경우에는 Domain Service가 해당 유스케이스의 트랜잭션을 시작한다.
+조회 유스케이스는 Facade의 `@Transactional(readOnly = true)`, 상태 변경 유스케이스는 Facade의 `@Transactional`을 경계로 사용한다. Domain Service에는 트랜잭션 애노테이션을 두지 않으므로 유스케이스 안의 모든 조회·검증·변경·저장은 Facade가 시작한 하나의 트랜잭션에 포함된다.
 
-PointHistory와 StockHistory는 각각 Point와 Stock의 상태 변경에 부속된 감사 기록으로 보며, History를 함께 저장한다는 이유만으로 Facade를 사용하지 않는다. Facade 판단 기준은 History를 제외한 여러 비즈니스 애그리게잇의 상태를 함께 변경하는지 여부다.
+PointHistory와 StockHistory는 각각 Point와 Stock의 상태 변경에 부속된 감사 기록이다. `PointFacade`, `ProductFacade`, `OrderConfirmFacade`는 상태 변경과 해당 History 저장을 같은 트랜잭션으로 묶는다.
 
 이 설명은 `@Transactional`의 기본 전파 속성인 `REQUIRED`를 기준으로 한다. 이후 `REQUIRES_NEW`처럼 별도 트랜잭션을 생성하는 전파 속성을 사용하면 트랜잭션 경계를 다시 검토한다.
 
-Facade와 Domain Service가 같은 Repository 인터페이스를 사용하는 것은 순환 의존이 아니지만, 동일한 조회·저장 책임이 두 곳에 중복되지 않도록 호출 목적을 구분한다. Facade는 도메인의 상태를 직접 변경하거나 업무 규칙을 중복해서 구현하지 않는다. Facade가 서로 다른 책임을 함께 가지게 되면 유스케이스를 기준으로 분리한다.
+Facade는 Repository를 통한 조회·저장과 유스케이스 순서를 담당하고, Entity·Value Object·Domain Service는 업무 규칙을 담당한다. Facade가 Entity의 검증을 `if` 문으로 다시 구현하지 않으며, 서로 다른 처리 흐름과 변경 범위를 함께 가지게 되면 `{UseCase}Facade`로 분리한다.
 
-Domain Service는 Entity·Value Object·Change 또는 QueryResult처럼 domain에 선언된 타입을 반환한다. 여러 애그리게잇의 결과를 조합하는 Facade는 application의 `{Domain}Info`를 반환한다. Controller는 어느 경우에도 전달받은 객체를 HTTP 응답으로 직접 직렬화하지 않고 API 응답 DTO로 변환한다. Facade는 트랜잭션이 끝나기 전에 필요한 값을 Info로 구성하며, Domain Service가 Entity를 반환할 때도 Controller가 지연 로딩에 의존하지 않도록 필요한 상태를 미리 복원하거나 QueryResult를 사용한다. 반환 모델 경계의 대안과 비용은 [부록 A.12](./appendix-decisions.md#a12-레이어-간-반환-모델)에서 비교한다.
+Facade는 단순한 결과에는 Entity·Value Object·QueryResult 같은 domain 타입을 반환할 수 있고, 여러 값을 조합하거나 트랜잭션 안에서 값 복사가 필요하면 application의 `{Domain}Info`를 반환한다. Controller는 어느 경우에도 전달받은 객체를 HTTP 응답으로 직접 직렬화하지 않고 API 응답 DTO로 변환한다. `OrderConfirmFacade`는 지연 로딩에 의존하지 않도록 트랜잭션 안에서 `OrderInfo`를 구성한다. 반환 모델 경계의 대안과 비용은 [부록 A.12](./appendix-decisions.md#a12-레이어-간-반환-모델)에서 비교한다.
 
 호출 경계와 트랜잭션 위치의 대안 및 현재 구조를 선택한 이유는 [부록 A.7](./appendix-decisions.md#a7-단일다중-애그리게잇-유스케이스의-호출-경계와-트랜잭션-위치)에서 비교한다. 읽기 전용 조합 조회의 경계는 [부록 A.11](./appendix-decisions.md#a11-읽기-전용-조합-조회의-호출-경계)에서 별도로 비교한다.
 
@@ -108,7 +111,7 @@ flowchart LR
 
 ## 2.4 Repository 추상화 위치
 
-domain이 필요한 저장 행동을 인터페이스로 선언하고, infrastructure가 이를 구현한다(DIP). Facade와 Domain Service는 Spring Data JPA Repository나 QueryDSL 구현체를 직접 참조하지 않고 domain의 Repository 인터페이스를 사용한다.
+domain이 필요한 저장 행동을 인터페이스로 선언하고, infrastructure가 이를 구현한다(DIP). Facade는 Spring Data JPA Repository나 QueryDSL 구현체를 직접 참조하지 않고 domain의 Repository 인터페이스를 사용한다. 현재 순수 Domain Service는 Repository에 의존하지 않는다. 여기서 순수하다는 것은 Repository·트랜잭션 경계·외부 I/O 없이 도메인 규칙을 수행한다는 뜻이며, Spring 빈 등록을 위한 stereotype 사용 자체를 금지한다는 뜻은 아니다. Repository가 도메인 판단에 반드시 필요한 예외는 이유와 결합 비용을 기록한 뒤 별도로 결정한다.
 
 - Entity의 조회·저장처럼 애그리게잇 상태를 다루는 인터페이스는 `domain/{기능}`에 `{기능}Repository`로 선언한다.
 - 목록·상세 화면에 필요한 조인·집계 결과를 한 번에 반환하는 읽기 전용 인터페이스는 `domain/{기능}`에 `{기능}QueryRepository`로 선언하고 `{기능}QueryResult`를 반환한다.
@@ -127,14 +130,14 @@ public interface ProductQueryRepository {
 // infrastructure/product
 // ProductRepositoryImpl이 ProductRepository를 구현하고, 내부에서 ProductJpaRepository(Spring Data JPA)에 위임한다.
 // ProductQueryRepositoryImpl은 필요한 경우 JPAQueryFactory로 Product·Brand를 조인하고 Like를 집계한다.
-// Facade 또는 Domain Service는 목적에 맞는 Repository 인터페이스를 주입받아 사용한다.
+// Facade는 목적에 맞는 Repository 인터페이스를 주입받아 사용한다.
 ```
 
 `ProductQueryResult`의 `brandName`과 `likeCount`는 조회 시 계산·조합되는 스칼라 값이며 ProductModel의 영속 상태가 아니다. `stockQuantity`는 Product가 소유한 Stock의 현재 수량을 읽은 값이다. QueryRepository는 읽기 모델을 위한 포트이므로 애그리게잇 변경에 사용하지 않는다.
 
-찾는 대상이 없을 때의 처리(예: NOT_FOUND)는 Repository가 아니라 호출자인 Facade 또는 Domain Service가 판단한다.
+찾는 대상이 없을 때의 처리(예: NOT_FOUND)는 Repository가 아니라 호출자인 Facade가 판단한다.
 
-이 추상화로 Facade와 Domain Service는 구체적인 저장·조회 구현에 직접 의존하지 않으며, Repository 인터페이스가 유지되는 범위에서는 구현 변경의 영향을 infrastructure에 제한할 수 있다. 테스트에서는 fake 구현을 연결해 업무 로직을 검증할 수 있지만, JPA의 영속성 동작은 실제 데이터베이스를 사용하는 테스트로 확인해야 한다. Domain Entity와 JPA Entity를 통합하고 JPA의 관리 Entity와 변경 감지 기능을 활용하는 선택도 유지하므로, 다른 저장 기술로 교체할 때 domain이나 Service의 수정이 없다고 보장하지는 않는다. 대신 필요한 저장 행동을 domain의 Repository 인터페이스에 명시하고 infrastructure에 위임 코드를 작성해야 하는 비용을 받아들인다.
+이 추상화로 Facade는 구체적인 저장·조회 구현에 직접 의존하지 않으며, Repository 인터페이스가 유지되는 범위에서는 구현 변경의 영향을 infrastructure에 제한할 수 있다. 테스트에서는 fake 구현을 연결해 업무 로직을 검증할 수 있지만, JPA의 영속성 동작은 실제 데이터베이스를 사용하는 테스트로 확인해야 한다. Domain Entity와 JPA Entity를 통합하고 JPA의 관리 Entity와 변경 감지 기능을 활용하는 선택도 유지하므로, 다른 저장 기술로 교체할 때 domain이나 Facade의 수정이 없다고 보장하지는 않는다. 대신 필요한 저장 행동을 domain의 Repository 인터페이스에 명시하고 infrastructure에 위임 코드를 작성해야 하는 비용을 받아들인다.
 
 ## 2.5 ArchUnit 검증 규칙
 
@@ -146,6 +149,8 @@ public interface ProductQueryRepository {
 |application|interfaces·infrastructure|
 |interfaces|infrastructure|
 |infrastructure|application·interfaces|
+|`*Controller`|`*Service`·`*Repository` 직접 의존|
+|`*Facade`|다른 `*Facade` 의존|
 
 support는 독립된 계층으로 취급하지 않으므로 계층 간 의존 규칙의 검증 대상에 포함하지 않는다.
 
@@ -161,8 +166,9 @@ Java의 public 클래스와 파일 이름은 동일하게 사용한다. 문서 �
 |분리한 JPA Entity|`{Domain}JpaEntity`|`OrderJpaEntity`|
 |Domain↔JPA 변환기|`{Domain}JpaMapper`|`OrderJpaMapper`|
 |Value Object|도메인 용어|`Stock`, `Money`|
-|Domain Service|`{Domain}Service`|`PointService`|
-|다중 애그리게잇 변경 Application Service|`{UseCase}Facade`|`OrderConfirmFacade`|
+|일반 Application Service|`{Domain}Facade`|`ProductFacade`|
+|별도 흐름 Application Service|`{UseCase}Facade`|`OrderConfirmFacade`|
+|Domain Service|`{Domain}Service`|`OrderService`|
 |Facade 결과 모델|`{Domain}Info`|`OrderInfo`|
 |Repository 인터페이스|`{Domain}Repository`|`OrderRepository`|
 |읽기 전용 조회 인터페이스|`{Domain}QueryRepository`|`ProductQueryRepository`|
@@ -175,4 +181,4 @@ Java의 public 클래스와 파일 이름은 동일하게 사용한다. 문서 �
 
 통합한 모델은 `{Domain}Model` 하나가 Domain Entity와 JPA Entity의 역할을 함께 담당하므로 별도의 `{Domain}JpaEntity`와 Mapper를 만들지 않는다. 선택적으로 분리한 경우에는 `{Domain}Model`을 domain에 유지하고, `{Domain}JpaEntity`와 `{Domain}JpaMapper`를 `infrastructure/{feature}`에 둔다. RepositoryImpl은 Mapper를 사용해 두 모델을 변환하며, application과 domain에 JpaEntity를 노출하지 않는다.
 
-`{Domain}Info`는 Facade가 여러 domain 결과를 조합해 Controller에 전달할 때만 사용한다. Domain Service는 application의 Info를 참조하지 않으며, Controller는 Info나 domain 타입을 `{Domain}V1Dto.Response`로 변환한다. Info는 application 모델이므로 [3.3](./03-domain-model.md#33-도메인-클래스-설계)의 도메인 클래스 다이어그램에는 포함하지 않는다.
+`{Domain}Info`는 Facade가 여러 domain 결과를 조합해 Controller에 전달할 때만 사용한다. Domain Service는 application의 Info를 참조하지 않으며, Controller는 Facade가 반환한 Info나 domain 타입을 `{Domain}V1Dto.Response`로 변환한다. Info는 application 모델이므로 [3.3](./03-domain-model.md#33-도메인-클래스-설계)의 도메인 클래스 다이어그램에는 포함하지 않는다.

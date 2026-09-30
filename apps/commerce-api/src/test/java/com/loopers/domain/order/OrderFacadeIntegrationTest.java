@@ -1,5 +1,6 @@
 package com.loopers.domain.order;
 
+import com.loopers.application.order.OrderFacade;
 import com.loopers.domain.common.Money;
 import com.loopers.domain.product.ProductModel;
 import com.loopers.domain.user.UserModel;
@@ -24,12 +25,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
-@DisplayName("OrderService 는 주문 생성 시 상품을 읽어 검증하고 DRAFT 로 저장한다.")
+@DisplayName("OrderFacade 는 주문 생성 시 상품을 읽어 검증하고 DRAFT 로 저장한다.")
 @SpringBootTest
-class OrderServiceIntegrationTest {
+class OrderFacadeIntegrationTest {
 
     @Autowired
-    private OrderService orderService;
+    private OrderFacade orderFacade;
     @Autowired
     private UserFixture userFixture;
     @Autowired
@@ -58,7 +59,7 @@ class OrderServiceIntegrationTest {
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 10L);
             ProductModel pants = productFixture.createProduct("바지", 3_000L, 10L);
 
-            OrderModel created = orderService.create(user.getId(), List.of(
+            OrderModel created = orderFacade.create(user.getId(), List.of(
                 new OrderItemCommand(shirt.getId(), 2L),
                 new OrderItemCommand(pants.getId(), 1L)
             ));
@@ -77,7 +78,7 @@ class OrderServiceIntegrationTest {
             UserModel user = userFixture.createUserWithPoint();
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 10L);
 
-            orderService.create(user.getId(), List.of(new OrderItemCommand(shirt.getId(), 2L)));
+            orderFacade.create(user.getId(), List.of(new OrderItemCommand(shirt.getId(), 2L)));
 
             assertAll(
                 () -> assertThat(productJpaRepository.findById(shirt.getId()).orElseThrow().getStockQuantity())
@@ -92,12 +93,12 @@ class OrderServiceIntegrationTest {
             UserModel user = userFixture.createUserWithPoint();
             ProductModel shirt = productFixture.createProduct("티셔츠", 1_000L, 10L);
 
-            OrderModel created = orderService.create(user.getId(), List.of(
+            OrderModel created = orderFacade.create(user.getId(), List.of(
                 new OrderItemCommand(shirt.getId(), 2L),
                 new OrderItemCommand(shirt.getId(), 3L)
             ));
 
-            List<OrderItemModel> items = orderService.getOrder(user.getId(), created.getId()).getItems();
+            List<OrderItemModel> items = orderFacade.getOrder(user.getId(), created.getId()).getItems();
             assertAll(
                 () -> assertThat(items).hasSize(1),
                 () -> assertThat(items.get(0).getQuantity()).isEqualTo(5L),
@@ -110,7 +111,7 @@ class OrderServiceIntegrationTest {
         void rejectsEmptyItems() {
             UserModel user = userFixture.createUserWithPoint();
 
-            assertThatThrownBy(() -> orderService.create(user.getId(), List.of()))
+            assertThatThrownBy(() -> orderFacade.create(user.getId(), List.of()))
                 .isInstanceOf(CoreException.class)
                 .extracting("errorType")
                 .isEqualTo(ErrorType.INVALID_ORDER_ITEMS);
@@ -123,7 +124,7 @@ class OrderServiceIntegrationTest {
             UserModel user = userFixture.createUserWithPoint();
             ProductModel shirt = productFixture.createProduct("티셔츠", 1_000L, 10L);
 
-            assertThatThrownBy(() -> orderService.create(user.getId(), List.of(
+            assertThatThrownBy(() -> orderFacade.create(user.getId(), List.of(
                 new OrderItemCommand(shirt.getId(), 1L),
                 new OrderItemCommand(shirt.getId(), 0L)
             )))
@@ -138,7 +139,7 @@ class OrderServiceIntegrationTest {
         void rejectsUnknownProduct() {
             UserModel user = userFixture.createUserWithPoint();
 
-            assertThatThrownBy(() -> orderService.create(user.getId(),
+            assertThatThrownBy(() -> orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(999_999L, 1L))))
                 .isInstanceOf(CoreException.class)
                 .extracting("errorType")
@@ -152,7 +153,7 @@ class OrderServiceIntegrationTest {
             UserModel user = userFixture.createUserWithPoint();
             ProductModel deleted = productFixture.createDeletedProduct("단종 티셔츠", 1_000L, 10L);
 
-            assertThatThrownBy(() -> orderService.create(user.getId(),
+            assertThatThrownBy(() -> orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(deleted.getId(), 1L))))
                 .isInstanceOf(CoreException.class)
                 .extracting("errorType")
@@ -166,7 +167,7 @@ class OrderServiceIntegrationTest {
             UserModel user = userFixture.createUserWithPoint();
             ProductModel shirt = productFixture.createProduct("티셔츠", 1_000L, 10L);
 
-            assertThatThrownBy(() -> orderService.create(user.getId(), List.of(
+            assertThatThrownBy(() -> orderFacade.create(user.getId(), List.of(
                 new OrderItemCommand(shirt.getId(), Long.MAX_VALUE),
                 new OrderItemCommand(shirt.getId(), 1L)
             )))
@@ -181,14 +182,14 @@ class OrderServiceIntegrationTest {
         void keepsUnitPriceSnapshot() {
             UserModel user = userFixture.createUserWithPoint();
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 10L);
-            OrderModel created = orderService.create(user.getId(),
+            OrderModel created = orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 2L)));
 
             ProductModel stored = productJpaRepository.findById(shirt.getId()).orElseThrow();
             stored.update("티셔츠", 5_000L);
             productJpaRepository.save(stored);
 
-            OrderModel reloaded = orderService.getOrder(user.getId(), created.getId());
+            OrderModel reloaded = orderFacade.getOrder(user.getId(), created.getId());
             assertAll(
                 () -> assertThat(reloaded.getItems().get(0).getUnitPrice()).isEqualTo(Money.of(2_000L)),
                 () -> assertThat(reloaded.getOrderTotal()).isEqualTo(Money.of(4_000L))
@@ -204,10 +205,10 @@ class OrderServiceIntegrationTest {
         void returnsOwnOrder() {
             UserModel user = userFixture.createUserWithPoint();
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 10L);
-            OrderModel created = orderService.create(user.getId(),
+            OrderModel created = orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 2L)));
 
-            OrderModel found = orderService.getOrder(user.getId(), created.getId());
+            OrderModel found = orderFacade.getOrder(user.getId(), created.getId());
 
             assertAll(
                 () -> assertThat(found.getId()).isEqualTo(created.getId()),
@@ -222,10 +223,10 @@ class OrderServiceIntegrationTest {
             UserModel owner = userFixture.createUserWithPoint();
             UserModel other = userFixture.createUserWithPoint();
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 10L);
-            OrderModel created = orderService.create(owner.getId(),
+            OrderModel created = orderFacade.create(owner.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 1L)));
 
-            assertThatThrownBy(() -> orderService.getOrder(other.getId(), created.getId()))
+            assertThatThrownBy(() -> orderFacade.getOrder(other.getId(), created.getId()))
                 .isInstanceOf(CoreException.class)
                 .extracting("errorType")
                 .isEqualTo(ErrorType.ORDER_NOT_FOUND);
@@ -236,7 +237,7 @@ class OrderServiceIntegrationTest {
         void rejectsUnknownOrder() {
             UserModel user = userFixture.createUserWithPoint();
 
-            assertThatThrownBy(() -> orderService.getOrder(user.getId(), 999_999L))
+            assertThatThrownBy(() -> orderFacade.getOrder(user.getId(), 999_999L))
                 .isInstanceOf(CoreException.class)
                 .extracting("errorType")
                 .isEqualTo(ErrorType.ORDER_NOT_FOUND);

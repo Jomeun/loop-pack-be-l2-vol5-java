@@ -2,7 +2,7 @@
 
 ## 4.1 포인트 충전 후 주문 확정
 
-포인트 충전 후 주문 확정을 대표 흐름으로 선택한다. 이 흐름은 하나의 주된 애그리게잇을 변경하는 Domain Service와 여러 비즈니스 애그리게잇의 변경을 조율하는 Facade의 역할, 주문 확정 시 함께 변경되어야 하는 상태와 트랜잭션 경계를 보여 준다.
+포인트 충전 후 주문 확정을 대표 흐름으로 선택한다. 이 흐름은 모든 API 유스케이스를 시작하고 트랜잭션을 관리하는 Facade, Entity가 지키는 상태 규칙, 주문 확정 시 함께 변경되어야 하는 상태를 보여 준다.
 
 주문 생성은 이 흐름보다 먼저 완료되어 있으며, 고객이 소유한 `DRAFT` 주문이 존재한다고 가정한다. 포인트 충전과 주문 확정은 서로 다른 API 요청이자 별도의 트랜잭션이다. 따라서 주문 확정이 실패하더라도 앞서 완료된 포인트 충전 결과는 유지된다.
 
@@ -10,38 +10,38 @@
 
 ## 4.2 포인트 충전
 
-포인트 충전은 Point만 주된 상태로 변경하는 유스케이스이므로 `PointService`가 트랜잭션을 관리한다. PointHistory는 이 변경에 부속된 감사 기록으로 함께 저장한다.
+포인트 충전은 `PointFacade`가 유스케이스 순서와 트랜잭션을 관리한다. PointHistory는 Point 변경에 부속된 감사 기록으로 같은 트랜잭션에서 저장한다.
 
-공통 요청자 식별 단계에서 테스트 DB에 준비된 User의 존재를 확인한 뒤, PointService는 해당 User와 함께 fixture로 준비된 Point를 조회한다. 존재하는 User에게 Point가 없는 경우에는 최초 충전으로 간주해 새로 생성하지 않고 비정상적인 데이터 상태로 처리한다. 구체적인 오류 응답은 [5장](./05-api-contract.md#5-api-계약과-주요-규칙)의 API 계약에서 정한다.
+공통 요청자 식별 단계에서 `UserFacade`가 테스트 DB에 준비된 User의 존재를 확인한 뒤, PointFacade는 해당 User와 함께 fixture로 준비된 Point를 조회한다. 존재하는 User에게 Point가 없는 경우에는 최초 충전으로 간주해 새로 생성하지 않고 비정상적인 데이터 상태로 처리한다. 구체적인 오류 응답은 [5장](./05-api-contract.md#5-api-계약과-주요-규칙)의 API 계약에서 정한다.
 
 ```mermaid
 sequenceDiagram
     actor Customer as 고객
     participant Controller as PointV1Controller
-    participant Service as PointService
+    participant Facade as PointFacade
     participant PointRepository
     participant Point
     participant HistoryRepository as PointHistoryRepository
 
     Customer->>Controller: 포인트 충전 요청
-    Controller->>Service: charge(userId, amount)
-    Service->>PointRepository: 사용자 Point 조회
-    PointRepository-->>Service: Point
-    Service->>Point: charge(amount)
-    Point-->>Service: PointChange
-    Service->>HistoryRepository: charged(pointId, change) History 저장
-    Service->>PointRepository: Point 저장
-    Service-->>Controller: PointChange
+    Controller->>Facade: charge(userId, amount)
+    Facade->>PointRepository: 사용자 Point 조회
+    PointRepository-->>Facade: Point
+    Facade->>Point: charge(amount)
+    Point-->>Facade: PointChange
+    Facade->>HistoryRepository: charged(pointId, change) History 저장
+    Facade->>PointRepository: Point 저장
+    Facade-->>Controller: PointChange
     Controller-->>Customer: PointV1Dto.Response
 ```
 
 *그림 6. 포인트 충전 객체 협력 흐름*
 
-Point는 충전 금액이 양수인지 확인하고 잔액을 증가시킨 뒤 변경 전후 잔액과 충전액을 담은 PointChange를 반환한다. PointService는 `PointHistoryModel.charged(pointId, change)`로 충전 이력을 생성해 저장하고 domain 타입인 PointChange를 Controller에 반환한다. Controller는 충전 후 잔액을 `PointV1Dto.Response`로 변환한다. fixture에서 Point에 설정한 초기 잔액 0은 충전이나 사용에 따른 변경이 아니므로 PointHistory를 생성하지 않는다. Point 변경과 History 저장은 같은 트랜잭션에서 처리하며, 입력이나 저장에 실패하면 잔액과 History는 모두 변경되지 않는다.
+Point는 충전 금액이 양수인지 확인하고 잔액을 증가시킨 뒤 변경 전후 잔액과 충전액을 담은 PointChange를 반환한다. PointFacade는 `PointHistoryModel.charged(pointId, change)`로 충전 이력을 생성해 저장하고 domain 타입인 PointChange를 Controller에 반환한다. Controller는 충전 후 잔액을 `PointV1Dto.Response`로 변환한다. fixture에서 Point에 설정한 초기 잔액 0은 충전이나 사용에 따른 변경이 아니므로 PointHistory를 생성하지 않는다. Point 변경과 History 저장은 같은 트랜잭션에서 처리하며, 입력이나 저장에 실패하면 잔액과 History는 모두 변경되지 않는다.
 
 ## 4.3 주문 확정
 
-주문 생성은 Product의 상태를 읽어 Order와 OrderItem만 생성하므로 `OrderService`가 담당한다. 주문 확정은 Order, Product·Stock, Point라는 여러 비즈니스 애그리게잇이 함께 변경되는 유스케이스이므로 `OrderConfirmFacade`가 전체 처리 순서와 트랜잭션을 관리한다. API가 분리되어 있다는 사실이 아니라 실제로 함께 변경하는 비즈니스 애그리게잇의 수를 기준으로 호출 경계를 구분한다.
+주문 생성은 `OrderFacade`가 Product 조회, 요청한 모든 Product의 존재·활성 상태 확인, Order 저장과 트랜잭션을 담당하고, 순수 Domain Service인 `OrderService`가 중복 품목 병합과 준비된 상품의 주문 시점 가격으로 초안 Order를 만드는 규칙을 담당한다. 주문 확정은 별도 처리 흐름과 변경 범위를 가진 `OrderConfirmFacade`가 Order, Product·Stock, Point의 변경 순서와 전체 트랜잭션을 관리한다. 두 Facade는 서로 호출하지 않고 필요한 Repository와 도메인 객체에 직접 의존한다.
 
 ```mermaid
 sequenceDiagram

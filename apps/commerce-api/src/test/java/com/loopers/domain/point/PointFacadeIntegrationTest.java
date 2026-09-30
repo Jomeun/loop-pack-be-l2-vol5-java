@@ -1,5 +1,6 @@
 package com.loopers.domain.point;
 
+import com.loopers.application.point.PointFacade;
 import com.loopers.domain.user.UserModel;
 import com.loopers.fixture.UserFixture;
 import com.loopers.infrastructure.point.PointHistoryJpaRepository;
@@ -20,12 +21,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
-@DisplayName("PointService 는 포인트 충전과 잔액 조회를 DB 에 연결한다.")
+@DisplayName("PointFacade 는 포인트 충전과 잔액 조회를 DB 에 연결한다.")
 @SpringBootTest
-class PointServiceIntegrationTest {
+class PointFacadeIntegrationTest {
 
     @Autowired
-    private PointService pointService;
+    private PointFacade pointFacade;
     @Autowired
     private UserFixture userFixture;
     @Autowired
@@ -48,7 +49,7 @@ class PointServiceIntegrationTest {
         void savesIncreasedBalanceAndHistory() {
             UserModel user = userFixture.createUserWithPoint();
 
-            PointChange change = pointService.charge(user.getId(), 10_000L);
+            PointChange change = pointFacade.charge(user.getId(), 10_000L);
 
             PointModel saved = pointJpaRepository.findByUserId(user.getId()).orElseThrow();
             List<PointHistoryModel> histories = pointHistoryJpaRepository.findAll();
@@ -69,8 +70,8 @@ class PointServiceIntegrationTest {
         void accumulatesBalance() {
             UserModel user = userFixture.createUserWithPoint();
 
-            pointService.charge(user.getId(), 1_000L);
-            pointService.charge(user.getId(), 2_500L);
+            pointFacade.charge(user.getId(), 1_000L);
+            pointFacade.charge(user.getId(), 2_500L);
 
             PointModel saved = pointJpaRepository.findByUserId(user.getId()).orElseThrow();
             assertAll(
@@ -83,9 +84,9 @@ class PointServiceIntegrationTest {
         @Test
         void keepsStoredStateOnInvalidAmount() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 1_000L);
+            pointFacade.charge(user.getId(), 1_000L);
 
-            assertThatThrownBy(() -> pointService.charge(user.getId(), 0L))
+            assertThatThrownBy(() -> pointFacade.charge(user.getId(), 0L))
                 .isInstanceOf(CoreException.class)
                 .extracting("errorType")
                 .isEqualTo(ErrorType.INVALID_POINT_AMOUNT);
@@ -102,7 +103,7 @@ class PointServiceIntegrationTest {
         void rejectsWhenPointIsNotInitialized() {
             UserModel user = userFixture.createUserWithoutPoint();
 
-            assertThatThrownBy(() -> pointService.charge(user.getId(), 10_000L))
+            assertThatThrownBy(() -> pointFacade.charge(user.getId(), 10_000L))
                 .isInstanceOf(CoreException.class)
                 .extracting("errorType")
                 .isEqualTo(ErrorType.POINT_NOT_INITIALIZED);
@@ -121,9 +122,9 @@ class PointServiceIntegrationTest {
         @Test
         void returnsStoredBalance() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 4_200L);
+            pointFacade.charge(user.getId(), 4_200L);
 
-            PointModel point = pointService.getPoint(user.getId());
+            PointModel point = pointFacade.getPoint(user.getId());
 
             assertThat(point.getBalance()).isEqualTo(4_200L);
         }
@@ -133,7 +134,7 @@ class PointServiceIntegrationTest {
         void returnsZeroBalance() {
             UserModel user = userFixture.createUserWithPoint();
 
-            PointModel point = pointService.getPoint(user.getId());
+            PointModel point = pointFacade.getPoint(user.getId());
 
             assertThat(point.getBalance()).isZero();
         }
@@ -143,7 +144,7 @@ class PointServiceIntegrationTest {
         void rejectsWhenPointIsNotInitialized() {
             UserModel user = userFixture.createUserWithoutPoint();
 
-            assertThatThrownBy(() -> pointService.getPoint(user.getId()))
+            assertThatThrownBy(() -> pointFacade.getPoint(user.getId()))
                 .isInstanceOf(CoreException.class)
                 .extracting("errorType")
                 .isEqualTo(ErrorType.POINT_NOT_INITIALIZED);

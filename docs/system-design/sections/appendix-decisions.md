@@ -87,13 +87,15 @@ Domain Entity와 JPA Entity의 개념적인 역할은 구분하지만, 기본적
 |Controller가 항상 Domain Service를 호출|하나의 애그리게잇을 다루는 흐름은 단순하고 application 계층을 줄일 수 있다.|여러 애그리게잇의 처리 순서와 트랜잭션을 한 곳에서 조율하기 어렵고 Domain Service에 다른 도메인의 변경 책임이 섞일 수 있다.|
 |실제 변경되는 비즈니스 애그리게잇 수에 따라 구분|하나의 애그리게잇만 변경하는 명령은 짧게 유지하고 여러 애그리게잇 변경만 Facade가 조율할 수 있다.|Domain Service가 명령에 필요한 다른 애그리게잇의 Repository를 읽기 용도로 사용할 수 있으며, Controller의 호출 대상이 유스케이스에 따라 달라진다.|
 
-현재는 실제 변경되는 비즈니스 애그리게잇 수에 따라 호출 경계를 구분한다. 읽기 전용 조회와 하나의 주된 애그리게잇만 변경하는 명령은 Controller가 Domain Service를 직접 호출하고 Domain Service가 트랜잭션을 시작한다. Domain Service는 명령에 필요한 다른 애그리게잇의 Repository를 읽을 수 있지만 그 애그리게잇을 변경하지 않는다. 여러 비즈니스 애그리게잇의 상태를 함께 변경하는 기능은 Controller가 Facade를 호출하고, Facade가 Entity 또는 필요한 Domain Service의 행동을 호출하면서 전체 트랜잭션과 처리 순서를 관리한다.
+2주차에는 실제 변경되는 비즈니스 애그리게잇 수에 따라 호출 경계를 구분했다. 읽기와 단일 애그리게잇 명령은 Controller가 Domain Service를 직접 호출하고, 여러 애그리게잇 변경만 Facade가 담당했다. Facade 수를 줄일 수 있었지만 Controller의 호출 대상과 트랜잭션 시작 위치가 유스케이스마다 달랐고, Domain Service가 Repository·Spring Transaction·API 처리 순서를 함께 책임지는 비용이 생겼다.
 
-이 선택에 따라 상품 등록은 ProductService, 좋아요 등록은 LikeService, 주문 생성은 OrderService, Brand 삭제는 BrandService가 담당한다. 각 Service는 참조 대상의 상태를 읽지만 자신의 주된 애그리게잇만 변경한다. Order·Point·Product를 함께 변경하는 주문 확정은 OrderConfirmFacade가 담당한다. PointHistory와 StockHistory는 상태 변경에 부속된 감사 기록이므로 별도 비즈니스 애그리게잇 변경으로 세지 않는다.
+3주차 Transaction·Concurrency 작업에 앞서 이 선택을 재검토해, 현재는 모든 API 유스케이스가 application Facade를 거치고 Facade가 트랜잭션을 시작하는 대안을 선택한다. `BrandFacade`, `ProductFacade`, `LikeFacade`, `PointFacade`, `OrderFacade`가 일반 유스케이스를 담당하고, 별도 처리 흐름과 변경 범위를 가진 주문 확정은 `OrderConfirmFacade`가 담당한다. Facade는 다른 Facade를 호출하지 않고 필요한 domain Repository와 도메인 객체에 직접 의존한다.
 
-이 선택은 다른 도메인의 단순 조회가 필요할 때마다 전달 역할만 하는 Facade가 늘어나는 것을 막으면서, 주문 확정 같은 다중 애그리게잇 변경을 application에 모을 수 있다. Facade 안에서 호출되는 Domain Service는 기본 전파 속성 `REQUIRED`로 Facade의 트랜잭션에 참여하므로 전체 변경은 하나의 실제 트랜잭션으로 처리된다. 또한 두 계층 모두 infrastructure 구현체가 아니라 domain의 Repository 인터페이스에 의존한다.
+Domain Service는 기본적으로 Repository와 `@Transactional`을 갖지 않는 순수 규칙 객체로 둔다. 기존 Service 중 단순 조회·저장과 처리 순서만 담당하던 Service는 제거했다. 주문 생성의 중복 품목 병합, 합산 오버플로 검사, 주문 시점 가격으로 품목을 구성하는 규칙은 어느 한 Entity에 두기 어려우므로 `OrderService`에 남겼다. `OrderFacade`가 요청한 Product를 조회해 존재와 활성 상태를 모두 확인한 뒤 Product와 정규화된 요청을 전달하고 초안 Order를 받는다.
 
-대신 호출 대상과 트랜잭션 시작 위치가 유스케이스마다 달라지고, Domain Service가 Spring Transaction과 다른 도메인의 읽기용 Repository에 의존할 수 있는 비용을 받아들인다. Domain Service가 다른 애그리게잇까지 변경하기 시작하거나 트랜잭션 경계가 여러 Service에 흩어져 이해하기 어려워지거나, Spring 없이 Domain Service를 테스트·재사용해야 한다면 모든 유스케이스에 application 계층을 두고 Domain Service를 순수 규칙 객체로 유지하는 방안을 다시 검토한다.
+Repository 조회 자체가 도메인 판단의 일부이고 Facade에서 객체나 값으로 준비하기 어려운 경우에는 Domain Service의 Repository 의존을 예외적으로 검토할 수 있다. 다만 domain이 저장 기술의 조회 계약과 트랜잭션 실행 환경에 결합되고 단위 테스트에 저장소 대역이 필요해지는 비용이 있으므로, 현재는 그런 예외를 두지 않는다. 새 예외 후보가 생기면 Repository가 필요한 규칙, Facade에서 준비할 수 없는 이유와 결합 비용을 먼저 검토한다.
+
+이 선택으로 단순 조회와 변경에도 Facade 클래스가 추가되는 비용은 생긴다. 대신 Controller의 호출 방향, Spring Proxy를 통과하는 유스케이스 진입점과 트랜잭션 경계를 application으로 통일하고, domain 규칙과 저장 조율의 구분을 명확히 한다.
 
 ## A.8 주문의 중복 상품 품목 처리
 
@@ -117,7 +119,7 @@ Brand 삭제 가능 여부는 Brand 자신의 삭제 상태와 다른 애그리�
 |BrandService가 Product 조회 포트를 사용하고 Brand가 판단|Brand 관련 유스케이스를 하나의 Service에 모으고 별도 Facade를 두지 않을 수 있다.|Domain Service가 다른 도메인의 Repository를 읽기 용도로 사용하므로 도메인 간 조회 의존이 생기고, Product까지 변경하지 않는다는 경계를 지켜야 한다.|
 |별도의 Brand 삭제 정책 객체가 판단|크로스 애그리게잇 규칙을 명시적인 객체로 분리하고 독립적으로 테스트할 수 있다.|현재 한 가지 규칙을 위해 클래스와 호출 단계가 추가된다.|
 
-BrandService가 활성 Product의 존재 여부를 조회해 `BrandModel.delete(hasActiveProducts)`에 전달하고, BrandModel이 삭제 가능 여부를 판단하는 대안을 선택한다. BrandService는 Product를 읽기만 하고 주된 변경 대상인 Brand만 저장하므로 단일 애그리게잇 명령의 경계를 유지한다. 삭제 조건을 Service의 `if` 문으로 중복하지 않으며, Product까지 함께 변경해야 하거나 여러 애그리게잇의 처리 순서를 조율해야 한다면 Facade로 전환한다. 규칙이 여러 조건을 조합하거나 여러 유스케이스에서 재사용될 정도로 커지면 별도 정책 객체도 다시 검토한다.
+Facade가 조회 결과를 전달하고 Brand가 판단하는 두 번째 대안을 선택한다. `BrandFacade`가 활성 Product 존재 여부를 조회해 `BrandModel.delete(hasActiveProducts)`에 전달하고, BrandModel이 삭제 가능 여부와 상태 변경을 책임진다. 삭제 조건을 Facade의 `if` 문으로 중복하지 않으며, 규칙이 여러 조건을 조합하거나 여러 유스케이스에서 재사용될 정도로 커지면 별도 정책 객체를 검토한다.
 
 ## A.10 상태 변경 결과와 History 생성 책임
 
@@ -129,7 +131,7 @@ PointHistory와 StockHistory는 현재 상태 변경과 같은 트랜잭션에�
 |Point·Stock이 History를 직접 생성|변경과 이력 생성 규칙을 상태 객체 한곳에 모을 수 있다.|상태 객체가 관리자 변경·주문 확정 같은 유스케이스의 원인과 History Entity까지 알아야 한다.|
 |상태 객체는 Change VO를 반환하고 History의 이름 있는 팩토리가 레코드를 생성|상태 변경 계산과 이력 필드 구성을 각각 한곳에 모으면서 유스케이스의 원인은 호출자가 선택할 수 있다.|`PointChange`·`StockChange` 타입과 팩토리 메서드가 추가되고 호출자는 History 저장을 빠뜨리지 않아야 한다.|
 
-세 번째 대안을 선택한다. Point와 Stock은 유효성을 확인해 상태를 바꾸고 변경 전후 값과 변경량을 담은 PointChange·StockChange를 반환한다. PointHistoryModel과 StockHistoryModel은 `charged`, `usedForOrder`, `changedByAdmin`, `deductedByOrder` 같은 팩토리 메서드로 원인별 필드 구성을 책임진다. PointService와 OrderConfirmFacade는 적절한 팩토리를 선택하고 생성된 History를 상태 변경과 같은 트랜잭션에서 저장한다.
+세 번째 대안을 선택한다. Point와 Stock은 유효성을 확인해 상태를 바꾸고 변경 전후 값과 변경량을 담은 PointChange·StockChange를 반환한다. PointHistoryModel과 StockHistoryModel은 `charged`, `usedForOrder`, `changedByAdmin`, `deductedByOrder` 같은 팩토리 메서드로 원인별 필드 구성을 책임진다. PointFacade, ProductFacade와 OrderConfirmFacade는 적절한 팩토리를 선택하고 생성된 History를 상태 변경과 같은 트랜잭션에서 저장한다.
 
 이 구조는 History 생성 형식의 중복을 줄이지만 저장 자체를 강제하지는 않는다. 따라서 각 상태 변경 유스케이스의 테스트에서 상태와 History가 함께 저장되거나 함께 롤백되는지를 검증한다. 환불·부분 취소처럼 변경 원인이 늘어나면 팩토리 메서드나 별도 History 정책 객체의 필요성을 다시 검토한다.
 
@@ -139,13 +141,14 @@ PointHistory와 StockHistory는 현재 상태 변경과 같은 트랜잭션에�
 
 |대안|장점|비용|
 |---|---|---|
-|ProductService가 ProductQueryRepository의 완성된 projection을 조회|추가 Facade 없이 한 번의 읽기 쿼리로 화면 계약을 반환하고 조회 경계를 짧게 유지할 수 있다.|Domain Service가 애그리게잇 Repository뿐 아니라 조회 전용 계약도 가지며, 조회 요구가 커지면 책임이 비대해질 수 있다.|
-|ProductFacade가 Product·Brand·Like Repository를 각각 조합|여러 도메인의 데이터 조합을 application에 명시적으로 드러낼 수 있다.|DB가 한 번에 처리할 수 있는 조인·집계를 애플리케이션에서 재조합하거나 Facade가 단순 전달 계층이 될 수 있다.|
+|ProductService가 ProductQueryRepository의 완성된 projection을 조회|추가 Facade 없이 한 번의 읽기 쿼리로 화면 계약을 반환하고 조회 경계를 짧게 유지할 수 있다.|Controller의 호출 대상과 트랜잭션 위치가 다른 유스케이스와 달라지고 Domain Service가 저장 기술의 조회 포트에 의존한다.|
+|ProductFacade가 ProductQueryRepository의 완성된 projection을 조회|API 진입점과 읽기 트랜잭션을 application으로 통일하면서 조인·집계는 DB에 맡길 수 있다.|Facade가 조회 포트를 호출하는 짧은 전달 계층으로 보일 수 있다.|
+|ProductFacade가 Product·Brand·Like Repository를 각각 조합|여러 도메인의 데이터 조합을 application에 명시적으로 드러낼 수 있다.|DB가 한 번에 처리할 수 있는 조인·집계를 애플리케이션에서 재조합한다.|
 |별도 ProductQueryService를 application에 둠|쓰기 유스케이스와 읽기 모델을 분리해 복잡한 조회를 독립적으로 확장하기 쉽다.|현재 규모에서는 Service와 모델이 추가되고 Controller의 호출 규칙이 더 다양해진다.|
 
-현재는 첫 번째 대안을 선택한다. `ProductService`가 읽기 전용 트랜잭션에서 `ProductQueryRepository`를 호출하고, infrastructure 구현체가 Product·Brand 조인과 Like 집계를 수행해 `ProductQueryResult`를 반환한다. `brandName`과 `likeCount`는 ProductModel에 저장하지 않는다.
+현재는 두 번째 대안을 선택한다. `ProductFacade`가 읽기 전용 트랜잭션에서 `ProductQueryRepository`를 호출하고, infrastructure 구현체가 Product·Brand 조인과 Like 집계를 수행해 `ProductQueryResult`를 반환한다. `brandName`과 `likeCount`는 ProductModel에 저장하지 않는다.
 
-판단 기준은 SQL 문장의 개수나 조회하는 테이블 수가 아니라 실제 변경 범위다. 상태를 변경하지 않고 하나의 조회 포트가 완성된 읽기 결과를 반환하면 Domain Service를 사용한다. 명령에 다른 애그리게잇의 사실이 필요하더라도 하나의 주된 애그리게잇만 변경하면 Domain Service가 읽기용 Repository를 사용할 수 있다. 여러 비즈니스 애그리게잇의 행동·상태 변경을 하나의 트랜잭션에서 조율해야 할 때 Facade를 사용한다. 조회 조건과 projection이 빠르게 늘어나 ProductService의 변경 이유가 쓰기 규칙과 분리되기 시작하면 별도 application QueryService를 검토한다.
+Facade는 완성된 읽기 결과를 반환하는 조회 포트를 그대로 사용할 수 있으며, 조회 테이블 수만으로 Domain Service를 만들지 않는다. 조회 조건과 projection이 빠르게 늘어나 ProductFacade의 변경 이유가 쓰기 유스케이스와 분리되기 시작하면 별도 application QueryFacade 또는 QueryService를 검토한다.
 
 ## A.12 레이어 간 반환 모델
 
@@ -154,12 +157,12 @@ Service와 Facade의 처리 결과를 Controller에 전달할 때 domain 모델�
 |대안|장점|비용|
 |---|---|---|
 |Info 없이 Entity·VO를 반환|별도 결과 모델과 변환 코드가 적다.|JPA와 함께 사용하는 Entity가 interfaces까지 노출되고, Controller가 지연 로딩이나 도메인 내부 구조에 의존하기 쉽다.|
-|모든 Service와 Facade가 application의 Info를 반환|Controller의 입력 타입을 Info로 통일하고 domain 모델 노출을 막을 수 있다.|domain의 Domain Service가 application의 Info를 참조하면 의존 방향을 위반하며, 이를 피하려면 모든 유스케이스를 application이 감싸야 한다.|
-|Domain Service는 domain 타입을, Facade는 Info를 반환|현재 호출 경계와 계층 의존 방향을 유지하면서 다중 애그리게잇 결과만 application에서 조합할 수 있다.|Controller가 domain 타입과 Info라는 서로 다른 반환 유형을 다루며, Entity 반환 시 필요한 상태를 트랜잭션 안에서 복원해야 한다.|
+|모든 Facade가 application의 Info를 반환|Controller의 입력 타입을 Info로 통일하고 domain 모델 노출을 막을 수 있다.|단순 조회·변경에도 결과 모델과 변환 코드가 반복된다.|
+|Facade가 단순 결과에는 domain 타입을, 조합·복사가 필요할 때 Info를 반환|불필요한 결과 모델을 줄이면서 지연 로딩이나 여러 결과 조합이 필요한 흐름만 application 모델로 보호할 수 있다.|Controller가 domain 타입과 Info라는 서로 다른 반환 유형을 다룬다.|
 
-세 번째 대안을 선택한다. PointService는 PointChange, ProductService의 조합 조회는 ProductQueryResult처럼 domain에 선언된 타입을 반환한다. OrderConfirmFacade는 Order·OrderItem·결제 정보를 조합한 `OrderInfo`를 application에 만들어 반환한다. Domain Service는 application의 Info에 의존하지 않는다.
+세 번째 대안을 선택한다. PointFacade는 PointChange, ProductFacade의 조합 조회는 ProductQueryResult처럼 domain에 선언된 타입을 반환한다. OrderConfirmFacade는 Order·OrderItem·결제 정보를 조합한 `OrderInfo`를 application에 만들어 반환한다. Domain Service는 application의 Info에 의존하지 않는다.
 
-Controller는 전달받은 domain 타입이나 Info를 API 버전에 맞는 `{Domain}V1Dto.Response`로 변환하며 Entity를 HTTP 응답으로 직접 직렬화하지 않는다. Facade는 트랜잭션 안에서 Info에 필요한 값을 모두 채우고, Domain Service가 Entity를 반환하는 경우에도 Controller가 지연 로딩을 발생시키지 않도록 필요한 연관을 미리 복원하거나 QueryResult를 사용한다. 반환 요구가 복잡해져 Entity 노출과 매핑 부담이 커지면 해당 조회에 전용 QueryResult를 추가한다.
+Controller는 Facade가 반환한 domain 타입이나 Info를 API 버전에 맞는 `{Domain}V1Dto.Response`로 변환하며 Entity를 HTTP 응답으로 직접 직렬화하지 않는다. Facade는 트랜잭션 안에서 Info에 필요한 값을 모두 채우고, Entity를 반환하는 경우에도 Controller가 지연 로딩을 발생시키지 않도록 필요한 연관을 미리 복원하거나 QueryResult를 사용한다. 반환 요구가 복잡해져 Entity 노출과 매핑 부담이 커지면 해당 조회에 전용 QueryResult나 Info를 추가한다.
 
 ## A.13 관리자 조회의 삭제 데이터 노출 정책
 

@@ -1,5 +1,6 @@
 package com.loopers.domain.brand;
 
+import com.loopers.application.brand.BrandFacade;
 import com.loopers.domain.common.ListSort;
 import com.loopers.domain.common.PageCommand;
 import com.loopers.domain.common.PageResult;
@@ -22,12 +23,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
-@DisplayName("BrandService 는 브랜드를 등록·조회·수정·삭제한다.")
+@DisplayName("BrandFacade 는 브랜드를 등록·조회·수정·삭제한다.")
 @SpringBootTest
-class BrandServiceIntegrationTest {
+class BrandFacadeIntegrationTest {
 
     @Autowired
-    private BrandService brandService;
+    private BrandFacade brandFacade;
     @Autowired
     private BrandFixture brandFixture;
     @Autowired
@@ -48,7 +49,7 @@ class BrandServiceIntegrationTest {
         @DisplayName("앞뒤 공백을 제거한 이름으로 저장한다.")
         @Test
         void savesWithTrimmedName() {
-            BrandModel created = brandService.create("  나이키  ");
+            BrandModel created = brandFacade.create("  나이키  ");
 
             assertAll(
                 () -> assertThat(created.getId()).isNotNull(),
@@ -60,7 +61,7 @@ class BrandServiceIntegrationTest {
         @DisplayName("이름이 비어 있으면 INVALID_BRAND_NAME 으로 거절하고 저장하지 않는다.")
         @Test
         void rejectsBlankName() {
-            assertThatThrownBy(() -> brandService.create("   "))
+            assertThatThrownBy(() -> brandFacade.create("   "))
                 .isInstanceOf(CoreException.class)
                 .hasFieldOrPropertyWithValue("errorType", ErrorType.INVALID_BRAND_NAME);
             assertThat(brandJpaRepository.findAll()).isEmpty();
@@ -75,7 +76,7 @@ class BrandServiceIntegrationTest {
         void returnsActiveBrand() {
             BrandModel nike = brandFixture.createBrand("나이키");
 
-            BrandModel found = brandService.getBrand(nike.getId());
+            BrandModel found = brandFacade.getBrand(nike.getId());
 
             assertThat(found.getName()).isEqualTo("나이키");
         }
@@ -83,7 +84,7 @@ class BrandServiceIntegrationTest {
         @DisplayName("존재하지 않는 브랜드는 BRAND_NOT_FOUND 로 거절한다.")
         @Test
         void rejectsUnknownBrand() {
-            assertThatThrownBy(() -> brandService.getBrand(999L))
+            assertThatThrownBy(() -> brandFacade.getBrand(999L))
                 .isInstanceOf(CoreException.class)
                 .hasFieldOrPropertyWithValue("errorType", ErrorType.BRAND_NOT_FOUND);
         }
@@ -93,7 +94,7 @@ class BrandServiceIntegrationTest {
         void rejectsDeletedBrand() {
             BrandModel deleted = brandFixture.createDeletedBrand("사라진브랜드");
 
-            assertThatThrownBy(() -> brandService.getBrand(deleted.getId()))
+            assertThatThrownBy(() -> brandFacade.getBrand(deleted.getId()))
                 .isInstanceOf(CoreException.class)
                 .hasFieldOrPropertyWithValue("errorType", ErrorType.BRAND_NOT_FOUND);
         }
@@ -107,7 +108,7 @@ class BrandServiceIntegrationTest {
         void changesName() {
             BrandModel nike = brandFixture.createBrand("나이키");
 
-            BrandModel updated = brandService.update(nike.getId(), "나이키 코리아");
+            BrandModel updated = brandFacade.update(nike.getId(), "나이키 코리아");
 
             assertAll(
                 () -> assertThat(updated.getName()).isEqualTo("나이키 코리아"),
@@ -121,7 +122,7 @@ class BrandServiceIntegrationTest {
         void keepsNameWhenInvalid() {
             BrandModel nike = brandFixture.createBrand("나이키");
 
-            assertThatThrownBy(() -> brandService.update(nike.getId(), ""))
+            assertThatThrownBy(() -> brandFacade.update(nike.getId(), ""))
                 .isInstanceOf(CoreException.class)
                 .hasFieldOrPropertyWithValue("errorType", ErrorType.INVALID_BRAND_NAME);
             assertThat(brandJpaRepository.findById(nike.getId()).orElseThrow().getName()).isEqualTo("나이키");
@@ -132,7 +133,7 @@ class BrandServiceIntegrationTest {
         void rejectsDeletedBrand() {
             BrandModel deleted = brandFixture.createDeletedBrand("사라진브랜드");
 
-            assertThatThrownBy(() -> brandService.update(deleted.getId(), "새이름"))
+            assertThatThrownBy(() -> brandFacade.update(deleted.getId(), "새이름"))
                 .isInstanceOf(CoreException.class)
                 .hasFieldOrPropertyWithValue("errorType", ErrorType.BRAND_NOT_FOUND);
         }
@@ -146,7 +147,7 @@ class BrandServiceIntegrationTest {
         void deletesWhenNoActiveProducts() {
             BrandModel nike = brandFixture.createBrand("나이키");
 
-            brandService.delete(nike.getId());
+            brandFacade.delete(nike.getId());
 
             assertThat(brandJpaRepository.findById(nike.getId()).orElseThrow().getDeletedAt()).isNotNull();
         }
@@ -157,7 +158,7 @@ class BrandServiceIntegrationTest {
             BrandModel nike = brandFixture.createBrand("나이키");
             productFixture.createProduct(nike.getId(), "품절 운동화", 10_000L, 0L);
 
-            assertThatThrownBy(() -> brandService.delete(nike.getId()))
+            assertThatThrownBy(() -> brandFacade.delete(nike.getId()))
                 .isInstanceOf(CoreException.class)
                 .hasFieldOrPropertyWithValue("errorType", ErrorType.BRAND_HAS_ACTIVE_PRODUCTS);
             assertThat(brandJpaRepository.findById(nike.getId()).orElseThrow().getDeletedAt()).isNull();
@@ -170,7 +171,7 @@ class BrandServiceIntegrationTest {
             var shoes = productFixture.createProduct(nike.getId(), "운동화", 10_000L, 3L);
             productFixture.deleteProduct(shoes.getId());
 
-            brandService.delete(nike.getId());
+            brandFacade.delete(nike.getId());
 
             assertThat(brandJpaRepository.findById(nike.getId()).orElseThrow().getDeletedAt()).isNotNull();
         }
@@ -182,7 +183,7 @@ class BrandServiceIntegrationTest {
             BrandModel adidas = brandFixture.createBrand("아디다스");
             productFixture.createProduct(adidas.getId(), "삼선 슬리퍼", 20_000L, 5L);
 
-            brandService.delete(nike.getId());
+            brandFacade.delete(nike.getId());
 
             assertThat(brandJpaRepository.findById(nike.getId()).orElseThrow().getDeletedAt()).isNotNull();
         }
@@ -192,7 +193,7 @@ class BrandServiceIntegrationTest {
         void rejectsDeletedBrand() {
             BrandModel deleted = brandFixture.createDeletedBrand("사라진브랜드");
 
-            assertThatThrownBy(() -> brandService.delete(deleted.getId()))
+            assertThatThrownBy(() -> brandFacade.delete(deleted.getId()))
                 .isInstanceOf(CoreException.class)
                 .hasFieldOrPropertyWithValue("errorType", ErrorType.BRAND_NOT_FOUND);
         }
@@ -209,7 +210,7 @@ class BrandServiceIntegrationTest {
             brandFixture.createDeletedBrand("삭제됨");
             brandFixture.createBrand("셋째");
 
-            PageResult<BrandModel> result = brandService.getBrands(PageCommand.of(null, null), ListSort.LATEST);
+            PageResult<BrandModel> result = brandFacade.getBrands(PageCommand.of(null, null), ListSort.LATEST);
 
             assertAll(
                 () -> assertThat(result.totalElements()).isEqualTo(3L),
@@ -225,7 +226,7 @@ class BrandServiceIntegrationTest {
             brandFixture.createBrand("둘째");
             brandFixture.createBrand("셋째");
 
-            PageResult<BrandModel> result = brandService.getBrands(PageCommand.of(null, null), ListSort.OLDEST);
+            PageResult<BrandModel> result = brandFacade.getBrands(PageCommand.of(null, null), ListSort.OLDEST);
 
             assertThat(result.items()).extracting(BrandModel::getName).containsExactly("첫째", "둘째", "셋째");
         }
@@ -235,7 +236,7 @@ class BrandServiceIntegrationTest {
         void returnsRequestedPage() {
             List.of("첫째", "둘째", "셋째", "넷째", "다섯째").forEach(brandFixture::createBrand);
 
-            PageResult<BrandModel> result = brandService.getBrands(PageCommand.of(1, 2), ListSort.OLDEST);
+            PageResult<BrandModel> result = brandFacade.getBrands(PageCommand.of(1, 2), ListSort.OLDEST);
 
             assertAll(
                 () -> assertThat(result.page()).isEqualTo(1),

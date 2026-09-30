@@ -1,18 +1,20 @@
-package com.loopers.domain.point;
+package com.loopers.application.point;
 
+import com.loopers.domain.point.PointChange;
+import com.loopers.domain.point.PointHistoryModel;
+import com.loopers.domain.point.PointHistoryRepository;
+import com.loopers.domain.point.PointModel;
+import com.loopers.domain.point.PointRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Point 만 주된 상태로 변경하는 유스케이스와 그 트랜잭션 경계를 담당한다.
- * PointHistory 는 이 변경에 부속된 감사 기록으로 함께 저장한다.
- */
+/** Point 변경과 부속 History 저장을 하나의 API 유스케이스 트랜잭션으로 묶는다. */
 @RequiredArgsConstructor
 @Component
-public class PointService {
+public class PointFacade {
 
     private final PointRepository pointRepository;
     private final PointHistoryRepository pointHistoryRepository;
@@ -20,7 +22,6 @@ public class PointService {
     @Transactional
     public PointChange charge(Long userId, long amount) {
         PointModel point = findPoint(userId);
-
         PointChange change = point.charge(amount);
 
         pointHistoryRepository.save(PointHistoryModel.charged(point.getId(), change));

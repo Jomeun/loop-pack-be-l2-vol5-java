@@ -2,12 +2,12 @@ package com.loopers.application.order;
 
 import com.loopers.domain.order.OrderItemCommand;
 import com.loopers.domain.order.OrderModel;
-import com.loopers.domain.order.OrderService;
+import com.loopers.application.order.OrderFacade;
 import com.loopers.domain.order.OrderStatus;
 import com.loopers.domain.point.PointChangeCause;
-import com.loopers.domain.point.PointService;
+import com.loopers.application.point.PointFacade;
 import com.loopers.domain.product.ProductModel;
-import com.loopers.domain.product.ProductService;
+import com.loopers.application.product.ProductFacade;
 import com.loopers.domain.product.StockChangeCause;
 import com.loopers.domain.user.UserModel;
 import com.loopers.fixture.ProductFixture;
@@ -40,11 +40,11 @@ class OrderConfirmFacadeIntegrationTest {
     @Autowired
     private OrderConfirmFacade orderConfirmFacade;
     @Autowired
-    private OrderService orderService;
+    private OrderFacade orderFacade;
     @Autowired
-    private PointService pointService;
+    private PointFacade pointFacade;
     @Autowired
-    private ProductService productService;
+    private ProductFacade productFacade;
     @Autowired
     private UserFixture userFixture;
     @Autowired
@@ -82,10 +82,10 @@ class OrderConfirmFacadeIntegrationTest {
         @Test
         void confirmsOrder() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 10_000L);
+            pointFacade.charge(user.getId(), 10_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
             ProductModel pants = productFixture.createProduct("바지", 3_000L, 4L);
-            OrderModel order = orderService.create(user.getId(), List.of(
+            OrderModel order = orderFacade.create(user.getId(), List.of(
                 new OrderItemCommand(shirt.getId(), 2L),
                 new OrderItemCommand(pants.getId(), 1L)
             ));
@@ -110,10 +110,10 @@ class OrderConfirmFacadeIntegrationTest {
         @Test
         void savesHistories() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 10_000L);
+            pointFacade.charge(user.getId(), 10_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
             ProductModel pants = productFixture.createProduct("바지", 3_000L, 4L);
-            OrderModel order = orderService.create(user.getId(), List.of(
+            OrderModel order = orderFacade.create(user.getId(), List.of(
                 new OrderItemCommand(shirt.getId(), 2L),
                 new OrderItemCommand(pants.getId(), 1L)
             ));
@@ -140,9 +140,9 @@ class OrderConfirmFacadeIntegrationTest {
         @Test
         void allowsExactBalance() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 4_000L);
+            pointFacade.charge(user.getId(), 4_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
-            OrderModel order = orderService.create(user.getId(),
+            OrderModel order = orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 2L)));
 
             orderConfirmFacade.confirm(user.getId(), order.getId());
@@ -154,12 +154,12 @@ class OrderConfirmFacadeIntegrationTest {
         @Test
         void chargesSnapshotPriceAfterPriceChange() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 10_000L);
+            pointFacade.charge(user.getId(), 10_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
-            OrderModel order = orderService.create(user.getId(),
+            OrderModel order = orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 2L)));
 
-            productService.update(shirt.getId(), "티셔츠", 5_000L);
+            productFacade.update(shirt.getId(), "티셔츠", 5_000L);
 
             OrderInfo confirmed = orderConfirmFacade.confirm(user.getId(), order.getId());
 
@@ -182,10 +182,10 @@ class OrderConfirmFacadeIntegrationTest {
         @Test
         void rejectsInsufficientPoint() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 6_999L);
+            pointFacade.charge(user.getId(), 6_999L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
             ProductModel pants = productFixture.createProduct("바지", 3_000L, 4L);
-            OrderModel order = orderService.create(user.getId(), List.of(
+            OrderModel order = orderFacade.create(user.getId(), List.of(
                 new OrderItemCommand(shirt.getId(), 2L),
                 new OrderItemCommand(pants.getId(), 1L)
             ));
@@ -212,10 +212,10 @@ class OrderConfirmFacadeIntegrationTest {
         @Test
         void rejectsInsufficientStockAndRollsBack() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 10_000L);
+            pointFacade.charge(user.getId(), 10_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
             ProductModel pants = productFixture.createProduct("바지", 3_000L, 1L);
-            OrderModel order = orderService.create(user.getId(), List.of(
+            OrderModel order = orderFacade.create(user.getId(), List.of(
                 new OrderItemCommand(shirt.getId(), 2L),
                 new OrderItemCommand(pants.getId(), 2L)
             ));
@@ -240,12 +240,12 @@ class OrderConfirmFacadeIntegrationTest {
         @Test
         void rejectsWhenStockDroppedAfterDraft() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 10_000L);
+            pointFacade.charge(user.getId(), 10_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
-            OrderModel order = orderService.create(user.getId(),
+            OrderModel order = orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 2L)));
 
-            productService.changeStock(shirt.getId(), 1L);
+            productFacade.changeStock(shirt.getId(), 1L);
 
             assertThatThrownBy(() -> orderConfirmFacade.confirm(user.getId(), order.getId()))
                 .isInstanceOf(CoreException.class)
@@ -270,9 +270,9 @@ class OrderConfirmFacadeIntegrationTest {
         @Test
         void rejectsAlreadyConfirmedOrder() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 10_000L);
+            pointFacade.charge(user.getId(), 10_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
-            OrderModel order = orderService.create(user.getId(),
+            OrderModel order = orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 2L)));
             orderConfirmFacade.confirm(user.getId(), order.getId());
 
@@ -294,9 +294,9 @@ class OrderConfirmFacadeIntegrationTest {
         void rejectsOtherUsersOrder() {
             UserModel owner = userFixture.createUserWithPoint();
             UserModel other = userFixture.createUserWithPoint();
-            pointService.charge(other.getId(), 10_000L);
+            pointFacade.charge(other.getId(), 10_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
-            OrderModel order = orderService.create(owner.getId(),
+            OrderModel order = orderFacade.create(owner.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 2L)));
 
             assertThatThrownBy(() -> orderConfirmFacade.confirm(other.getId(), order.getId()))
@@ -324,9 +324,9 @@ class OrderConfirmFacadeIntegrationTest {
         @Test
         void rejectsDeletedProduct() {
             UserModel user = userFixture.createUserWithPoint();
-            pointService.charge(user.getId(), 10_000L);
+            pointFacade.charge(user.getId(), 10_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
-            OrderModel order = orderService.create(user.getId(),
+            OrderModel order = orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 2L)));
 
             ProductModel stored = productJpaRepository.findById(shirt.getId()).orElseThrow();
@@ -349,7 +349,7 @@ class OrderConfirmFacadeIntegrationTest {
         void rejectsWhenPointIsNotInitialized() {
             UserModel user = userFixture.createUserWithoutPoint();
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
-            OrderModel order = orderService.create(user.getId(),
+            OrderModel order = orderFacade.create(user.getId(),
                 List.of(new OrderItemCommand(shirt.getId(), 2L)));
 
             assertThatThrownBy(() -> orderConfirmFacade.confirm(user.getId(), order.getId()))
