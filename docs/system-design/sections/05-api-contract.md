@@ -6,7 +6,7 @@
 
 ### 요청자 식별과 접근 범위
 
-- 고객 API는 `X-USER-ID` 헤더에 테스트 DB에 준비된 `UserModel`의 숫자 ID(`Long`)를 전달해 요청자를 식별한다. 이 값은 `jop0522` 같은 로그인 아이디가 아니다. `X-USER-ID`는 로컬 환경에서 요청자를 식별하기 위한 값이며, 로그인·인증 기능을 의미하지 않는다. interfaces 계층의 공통 요청자 식별 처리는 모든 고객 요청에서 헤더의 존재·숫자 형식과 User 존재 여부를 확인하고, 검증한 `userId`를 Controller에 전달한다. 헤더가 누락되거나 숫자로 변환할 수 없으면 `400 INVALID_REQUEST`, 숫자 ID에 해당하는 User가 없으면 `404 USER_NOT_FOUND`로 응답한다. 존재 여부 조회는 domain의 UserService에 맡기며 각 기능의 Service에서 같은 검증을 반복하지 않는다.
+- 고객 API는 `X-USER-ID` 헤더에 테스트 DB에 준비된 `UserModel`의 숫자 ID(`Long`)를 전달해 요청자를 식별한다. 이 값은 `jop0522` 같은 로그인 아이디가 아니다. `X-USER-ID`는 로컬 환경에서 요청자를 식별하기 위한 값이며, 로그인·인증 기능을 의미하지 않는다. interfaces 계층의 공통 요청자 식별 처리는 모든 고객 요청에서 헤더의 존재·숫자 형식과 User 존재 여부를 확인하고, 검증한 `userId`를 Controller에 전달한다. 헤더가 누락되거나 숫자로 변환할 수 없으면 `400 INVALID_REQUEST`, 숫자 ID에 해당하는 User가 없으면 `404 USER_NOT_FOUND`로 응답한다. 존재 여부 조회는 application의 `UserFacade`가 `UserRepository`를 통해 담당하며 각 기능의 Facade에서 같은 검증을 반복하지 않는다.
 - 고객은 자신의 좋아요·포인트·주문만 조회하거나 변경할 수 있다. 다른 사용자의 소유 자원은 존재 여부를 노출하지 않고 해당 자원의 `NOT_FOUND` 오류로 처리한다.
 - 관리자 API는 `/api-admin/**` 경로에 적용한 Spring Security 설정으로 구분한다. `ADMIN` 역할이 없는 일반 사용자와 식별되지 않은 요청은 모두 `403 Forbidden`으로 거절한다. 이 설정은 로컬 환경과 MockMvc 검증을 위한 접근 경계이며 운영용 로그인·토큰 발급·계정 관리 방식을 의미하지 않는다.
 - 이 경계는 `com.loopers.config.AdminBoundaryConfig`의 `SecurityFilterChain` 하나로 구현한다. `securityMatcher("/api-admin/**")`로 관리자 경로에만 적용하고 `hasRole("ADMIN")`을 요구하며, 인증되지 않은 요청도 `401`이 아닌 `403`으로 응답하도록 `authenticationEntryPoint`에서 `sendError(403)`을 사용한다. 관리자용 SecurityFilterChain은 고객 API 요청에 적용되지 않으므로 기존 `X-USER-ID` 식별 규칙을 그대로 유지한다. CSRF 보호는 기본값 그대로 두며, 관리자 변경 요청(POST·PUT·DELETE) 테스트는 `SecurityMockMvcRequestPostProcessors.csrf()`로 유효한 CSRF 입력을 함께 보낸다. 역할 거절 테스트에도 유효한 CSRF 입력을 사용해, 거절 사유가 CSRF가 아니라 요청자 구분임을 확인한다.
@@ -190,10 +190,10 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 |내 좋아요 목록|`GET /api/v1/users/{userId}/likes`|경로의 사용자 ID, 선택적 `page`, `size`, `sort`|`200`, 활성 상품에 대한 자신의 좋아요 페이지|`USER_NOT_FOUND`, `INVALID_PAGE_REQUEST`, `INVALID_SORT`|
 
 - 같은 User와 Product의 Like는 하나만 존재한다. 중복 등록은 `409 LIKE_ALREADY_EXISTS`로 거절하고 좋아요 수를 변경하지 않는다.
-- LikeService는 등록 시 Product의 존재와 삭제 여부를 읽어 확인하지만 Product를 변경하지 않고 Like만 생성한다.
+- `LikeFacade`는 등록 시 `ProductRepository`로 Product의 존재와 삭제 여부를 확인하지만 Product를 변경하지 않고 Like만 생성해 저장한다.
 - 취소할 Like 관계가 없으면 `404 LIKE_NOT_FOUND`로 응답한다.
 - 삭제된 Product에는 새 Like를 등록할 수 없고 내 좋아요 목록에서도 제외한다. 다만 삭제 전에 생성한 자신의 Like 관계는 취소할 수 있으므로, 이 경우 Product의 삭제 여부와 관계없이 Like를 찾아 삭제한다.
-- 내 좋아요 목록에서 `X-USER-ID`는 요청자를, 경로의 `{userId}`는 조회 대상을 식별한다. 공통 경계에서 확인한 요청자 ID와 경로의 사용자 ID를 비교하고, 두 값이 다르면 다른 사용자의 관계를 노출하지 않고 `404 USER_NOT_FOUND`로 응답한다. 두 값이 같으면 LikeService가 자신의 좋아요 목록을 조회한다.
+- 내 좋아요 목록에서 `X-USER-ID`는 요청자를, 경로의 `{userId}`는 조회 대상을 식별한다. 공통 경계에서 확인한 요청자 ID와 경로의 사용자 ID를 비교하고, 두 값이 다르면 다른 사용자의 관계를 노출하지 않고 `404 USER_NOT_FOUND`로 응답한다. 두 값이 같으면 `LikeFacade`가 `ProductQueryRepository`로 자신의 좋아요 상품 목록을 조회한다.
 
 ### 포인트
 
@@ -202,7 +202,7 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 |포인트 충전|`POST /api/v1/points/charge`|본문 `amount`|`200`, 충전 후 잔액|`INVALID_POINT_AMOUNT`, `NUMERIC_OVERFLOW`, `POINT_NOT_INITIALIZED`|
 |포인트 잔액 조회|`GET /api/v1/points`|추가 입력 없음|`200`, 현재 잔액|`POINT_NOT_INITIALIZED`|
 
-1포인트는 1원으로 계산한다. 잔액 0은 유효하지만 충전 요청 0은 유효하지 않다. 공통 요청자 식별 단계에서 User 존재 여부를 확인하며, 존재하는 User에게 fixture로 함께 준비되어야 할 Point가 없으면 PointService는 새 Point를 만들지 않고 데이터 불변식 위반인 `500 POINT_NOT_INITIALIZED`로 응답한다.
+1포인트는 1원으로 계산한다. 잔액 0은 유효하지만 충전 요청 0은 유효하지 않다. 공통 요청자 식별 단계에서 User 존재 여부를 확인하며, 존재하는 User에게 fixture로 함께 준비되어야 할 Point가 없으면 `PointFacade`는 새 Point를 만들지 않고 데이터 불변식 위반인 `500 POINT_NOT_INITIALIZED`로 응답한다. Point 조회·저장과 트랜잭션은 PointFacade가 담당하고, 충전 금액 검증과 잔액 변경은 PointModel이 담당한다.
 
 ### 주문
 
@@ -214,7 +214,7 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 |내 주문 상세|`GET /api/v1/orders/{orderId}`|주문 ID|`200`, 품목별 상품 ID·수량·주문 당시 단가·품목 금액, 주문 총액·포인트 사용액·결제액과 상태|`ORDER_NOT_FOUND`|
 
 - 주문 품목은 하나 이상이어야 하며 각 요청 품목의 수량이 1 이상인지 먼저 검증한다. 그다음 같은 Product의 수량을 합산하고 표현 범위를 확인해 하나의 OrderItem으로 저장한다. 중복 품목을 거절하는 대안과 합산을 선택한 이유는 [부록 A.8](./appendix-decisions.md#a8-주문의-중복-상품-품목-처리)에서 비교한다.
-- OrderService는 주문 생성 시 Product의 존재와 삭제 여부, 수량과 금액을 읽어 검증하고 주문 당시 가격으로 Order와 OrderItem을 생성한다. 이 과정에서는 Product·재고·포인트를 변경하지 않는다.
+- 주문 생성 시 `OrderFacade`가 트랜잭션 안에서 활성 Product를 조회하고 요청한 Product가 모두 존재하는지 확인한 뒤 Order를 저장한다. 순수 Domain Service인 `OrderService`는 품목별 양수 수량 검증, 중복 수량 병합과 합산 오버플로 검증, 준비된 Product의 주문 당시 가격을 사용한 OrderItem·초안 Order 생성을 담당한다. 이 과정에서는 Product·재고·포인트를 변경하지 않는다.
 - `DRAFT` 주문의 포인트 사용액과 결제액은 아직 결제가 발생하지 않았으므로 `null`로 반환한다. `CONFIRMED` 주문에는 주문 확정 시 기록한 값을 반환한다.
 - 주문 확정은 저장된 OrderItem을 기준으로 처리한다. 고객이 소유한 `DRAFT` 주문만 확정할 수 있으며, 이미 확정된 주문은 `409 ORDER_NOT_CONFIRMABLE`로 거절한다.
 - 주문이 없거나 요청자가 소유자가 아니면 모두 `404 ORDER_NOT_FOUND`로 응답한다.
@@ -234,7 +234,7 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 |브랜드 수정|`PUT /api-admin/v1/brands/{brandId}`|본문 `name`|`200`, 수정한 브랜드|`BRAND_NOT_FOUND`, `INVALID_BRAND_NAME`|
 |브랜드 삭제|`DELETE /api-admin/v1/brands/{brandId}`|브랜드 ID|`200`, 데이터 없는 성공 응답|`BRAND_NOT_FOUND`, `BRAND_HAS_ACTIVE_PRODUCTS`|
 
-BrandService는 삭제되지 않은 Product가 연결되어 있는지 조회하고 그 결과를 `BrandModel.delete(hasActiveProducts)`에 전달한다. BrandModel은 활성 Product가 하나라도 있으면 재고가 0이어도 삭제를 거절한다. interfaces 계층은 이 도메인 오류를 `409 BRAND_HAS_ACTIVE_PRODUCTS` 응답으로 변환한다.
+`BrandFacade`는 삭제되지 않은 Product가 연결되어 있는지 `ProductRepository`로 조회하고 그 결과를 `BrandModel.delete(hasActiveProducts)`에 전달한다. BrandModel은 활성 Product가 하나라도 있으면 재고가 0이어도 삭제를 거절한다. interfaces 계층은 이 도메인 오류를 `409 BRAND_HAS_ACTIVE_PRODUCTS` 응답으로 변환한다.
 
 ### 상품·재고
 
@@ -247,7 +247,7 @@ BrandService는 삭제되지 않은 Product가 연결되어 있는지 조회하�
 |상품 삭제|`DELETE /api-admin/v1/products/{productId}`|상품 ID|`200`, 데이터 없는 성공 응답|`PRODUCT_NOT_FOUND`|
 |재고 변경|`PUT /api-admin/v1/products/{productId}/stock`|본문 `quantity`|`200`, 변경 후 최종 재고 수량|`PRODUCT_NOT_FOUND`, `INVALID_STOCK_QUANTITY`|
 
-- ProductService는 등록 시 Brand의 존재와 삭제 여부를 읽어 확인하지만 Brand를 변경하지 않고 초기 Stock이 0인 Product만 생성한다.
+- `ProductFacade`는 등록 시 `BrandRepository`로 Brand의 존재와 삭제 여부를 확인하지만 Brand를 변경하지 않고 초기 Stock이 0인 Product만 생성해 저장한다.
 - Product 수정은 Brand를 변경하지 않는다. 수정 요청에도 `brandId`를 받지 않으며 기존 관계를 유지한다.
 - 재고 변경의 `quantity`는 증감량이 아니라 변경 후의 최종 수량이다. Stock은 변경 전후 수량과 변경량을 담은 StockChange를 반환하고, `StockHistoryModel.changedByAdmin(productId, change)`가 관리자 변경 원인을 포함한 이력을 생성한다.
 - 삭제된 Product는 수정과 재고 변경의 대상이 될 수 없으며 `404 PRODUCT_NOT_FOUND`로 응답한다.

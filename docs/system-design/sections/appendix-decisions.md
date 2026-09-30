@@ -152,7 +152,7 @@ Facade는 완성된 읽기 결과를 반환하는 조회 포트를 그대로 사
 
 ## A.12 레이어 간 반환 모델
 
-Service와 Facade의 처리 결과를 Controller에 전달할 때 domain 모델과 application 결과 모델을 어디까지 사용할지 비교한다.
+Facade의 처리 결과를 Controller에 전달할 때 domain 모델과 application 결과 모델을 어디까지 사용할지 비교한다.
 
 |대안|장점|비용|
 |---|---|---|
