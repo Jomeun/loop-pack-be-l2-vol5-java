@@ -110,7 +110,7 @@ Repository 조회 자체가 도메인 판단의 일부이고 Facade에서 객체
 
 ## A.9 Brand 삭제 규칙의 위치
 
-Brand 삭제 가능 여부는 Brand 자신의 삭제 상태와 다른 애그리게잇인 Product의 존재 여부를 함께 사용한다.
+2주차의 Brand 삭제 가능 여부는 Brand 자신의 삭제 상태와 다른 애그리게잇인 Product의 존재 여부를 함께 사용했다. 아래 비교는 `활성 Product가 있으면 삭제 거절`이라는 당시 요구를 전제로 한다.
 
 |대안|장점|비용|
 |---|---|---|
@@ -119,7 +119,11 @@ Brand 삭제 가능 여부는 Brand 자신의 삭제 상태와 다른 애그리�
 |BrandService가 Product 조회 포트를 사용하고 Brand가 판단|Brand 관련 유스케이스를 하나의 Service에 모으고 별도 Facade를 두지 않을 수 있다.|Domain Service가 다른 도메인의 Repository를 읽기 용도로 사용하므로 도메인 간 조회 의존이 생기고, Product까지 변경하지 않는다는 경계를 지켜야 한다.|
 |별도의 Brand 삭제 정책 객체가 판단|크로스 애그리게잇 규칙을 명시적인 객체로 분리하고 독립적으로 테스트할 수 있다.|현재 한 가지 규칙을 위해 클래스와 호출 단계가 추가된다.|
 
-Facade가 조회 결과를 전달하고 Brand가 판단하는 두 번째 대안을 선택한다. `BrandFacade`가 활성 Product 존재 여부를 조회해 `BrandModel.delete(hasActiveProducts)`에 전달하고, BrandModel이 삭제 가능 여부와 상태 변경을 책임진다. 삭제 조건을 Facade의 `if` 문으로 중복하지 않으며, 규칙이 여러 조건을 조합하거나 여러 유스케이스에서 재사용될 정도로 커지면 별도 정책 객체를 검토한다.
+당시에는 Facade가 조회 결과를 전달하고 Brand가 판단하는 두 번째 대안을 선택했다. `BrandFacade`가 활성 Product 존재 여부를 조회해 `BrandModel.delete(hasActiveProducts)`에 전달하고, BrandModel이 삭제 가능 여부와 상태 변경을 책임졌다. 삭제 조건을 Facade의 `if` 문으로 중복하지 않는 선택이었다.
+
+3주차에는 요구가 `연결된 미삭제 Product도 Brand와 함께 삭제`로 바뀌어 기존 존재 여부 기반 거절의 전제가 사라졌다. 이번 설계에서는 BrandFacade가 하나의 트랜잭션에서 ProductRepository의 bulk soft delete와 Brand의 삭제 행동을 조율한다. 새 업무 판단 없이 단계만 중계하는 Domain Service나 별도 Removal Facade는 추가하지 않는다.
+
+Product Entity를 모두 조회해 개별 삭제 행동과 변경 감지를 사용하는 대안은 객체별 규칙·콜백을 유지하기 쉽지만, 대상 수에 따른 적재와 UPDATE 비용이 발생한다. 이번에는 bulk UPDATE를 선택하고 개별 행동·콜백을 우회하는 비용을 받아들인다. 변경 필드, 영속성 컨텍스트 처리, 조회 방어와 미보장 경쟁, 향후 배치·공통 Brand 잠금 대안 및 성능 재검토 기준은 중복하지 않고 [4.1](./04-use-cases.md#41-브랜드와-연관-상품-일괄-삭제)에 둔다.
 
 ## A.10 상태 변경 결과와 History 생성 책임
 

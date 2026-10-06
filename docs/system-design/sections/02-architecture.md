@@ -62,7 +62,7 @@ Controller
             → QueryResult
 ```
 
-`ProductFacade`는 `ProductQueryRepository`가 반환한 `ProductQueryResult`를 그대로 조회 계약으로 사용한다. `BrandFacade`는 Product 존재 여부를 읽어 Brand에 전달하고 Brand만 변경한다. `OrderFacade`는 요청한 Product가 모두 존재하고 활성 상태인지 확인한 뒤 준비된 객체를 순수 Domain Service인 `OrderService`에 전달하고, 주문 품목 구성 규칙을 맡긴 뒤 Order를 저장한다. 주문 확정은 별도 처리 흐름에서 Order·Point·Product의 상태를 함께 변경하므로 `OrderConfirmFacade`가 조율한다.
+`ProductFacade`는 `ProductQueryRepository`가 반환한 `ProductQueryResult`를 그대로 조회 계약으로 사용한다. `BrandFacade`는 Brand 삭제와 연결된 미삭제 Product의 bulk soft delete를 하나의 트랜잭션에서 조율한다. 일괄 삭제 포트는 domain의 ProductRepository에 선언하고 infrastructure에서 구현하며, 상세 순서와 보장 범위는 [4.1](./04-use-cases.md#41-브랜드와-연관-상품-일괄-삭제)에 둔다. `OrderFacade`는 요청한 Product가 모두 존재하고 활성 상태인지 확인한 뒤 준비된 객체를 순수 Domain Service인 `OrderService`에 전달하고, 주문 품목 구성 규칙을 맡긴 뒤 Order를 저장한다. 주문 확정은 별도 처리 흐름에서 Order·Point·Product의 상태를 함께 변경하므로 `OrderConfirmFacade`가 조율한다.
 
 Facade는 Domain Service를 반드시 거치지 않는다. Entity·Value Object가 스스로 지킬 수 있는 규칙은 해당 객체의 행동을 직접 호출하고, 여러 객체에 걸친 실제 도메인 규칙이 있을 때만 Domain Service를 호출한다. Facade가 다른 Facade를 호출하지 않으며, 여러 Aggregate가 협력하는 별도 흐름은 해당 흐름을 책임지는 `{UseCase}Facade`가 필요한 Repository와 Domain Service에 직접 의존한다.
 

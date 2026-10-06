@@ -11,6 +11,6 @@
 |[1. 버드뷰](./sections/01-overview.md)|시스템 개요, 구성과 기능 범위|
 |[2. 구조와 의존](./sections/02-architecture.md)|패키지 구조, 레이어 역할, 의존 방향, Repository와 명명 규칙|
 |[3. 도메인 관계](./sections/03-domain-model.md)|도메인 모델, 관계와 책임, 클래스 설계, 삭제 정책|
-|[4. 대표 흐름](./sections/04-use-cases.md)|포인트 충전과 주문 확정의 대표 협력 흐름|
+|[4. 대표 흐름](./sections/04-use-cases.md)|브랜드·상품 일괄 삭제, 포인트 충전과 주문 확정의 대표 협력 흐름|
 |[5. API 계약과 주요 규칙](./sections/05-api-contract.md)|공통 계약, 고객·관리자 API, 테스트 기대값|
 |[부록 A. 설계 대안과 선택 근거](./sections/appendix-decisions.md)|설계 대안 비교, 선택 이유와 비용|

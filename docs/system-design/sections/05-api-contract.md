@@ -61,7 +61,7 @@
 - 요청과 무관하게 서버 내부 데이터의 불변식이 깨진 경우에는 `500`을 사용한다. 예를 들어 존재하는 User에게 Point가 없으면 `500 POINT_NOT_INITIALIZED`로 응답한다.
 - 같은 HTTP 상태 안에서도 클라이언트가 실패 원인을 구분할 수 있도록 `PRODUCT_NOT_FOUND`, `LIKE_ALREADY_EXISTS`, `INSUFFICIENT_STOCK`과 같은 안정적인 업무 오류 코드를 사용한다. 기존 `ErrorType`을 유지하면서 각 업무 오류의 `HttpStatus`, 안정적인 코드와 기본 메시지를 추가한다. Domain은 발생한 업무 오류를 `CoreException`으로 표현하고, interfaces의 `ApiControllerAdvice`가 `ErrorType`의 정보를 사용해 실제 HTTP 응답을 생성한다.
 - Soft Delete된 Brand·Product는 활성 자원을 대상으로 하는 API에서 존재하지 않는 것으로 처리한다. 이미 삭제된 대상을 다시 삭제하는 요청도 각각 `404 BRAND_NOT_FOUND`, `404 PRODUCT_NOT_FOUND`로 응답한다.
-- 오류가 발생하면 해당 요청에서 변경하려던 Entity와 History는 저장하지 않는다.
+- 상태 변경 요청이 실패하면 해당 요청의 Entity·History 변경은 전체 rollback하여 최종 DB 상태에 남기지 않는다. 실패 전에 변경 SQL이 실행됐더라도 독립 commit이나 일부 성공으로 남기지 않는다.
 
 공통 식별·입력 형식 오류는 모든 API에 적용하며, API별 표의 대표 오류에서는 반복해 적지 않는다.
 
@@ -232,9 +232,11 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 |브랜드 등록|`POST /api-admin/v1/brands`|본문 `name`|`201`, 등록한 브랜드|`INVALID_BRAND_NAME`|
 |브랜드 상세|`GET /api-admin/v1/brands/{brandId}`|브랜드 ID|`200`, 활성 브랜드 상세|`BRAND_NOT_FOUND`|
 |브랜드 수정|`PUT /api-admin/v1/brands/{brandId}`|본문 `name`|`200`, 수정한 브랜드|`BRAND_NOT_FOUND`, `INVALID_BRAND_NAME`|
-|브랜드 삭제|`DELETE /api-admin/v1/brands/{brandId}`|브랜드 ID|`200`, 데이터 없는 성공 응답|`BRAND_NOT_FOUND`, `BRAND_HAS_ACTIVE_PRODUCTS`|
+|브랜드 삭제|`DELETE /api-admin/v1/brands/{brandId}`|브랜드 ID|`200`, 브랜드와 연결 미삭제 상품 삭제 완료, `data: null`|`BRAND_NOT_FOUND`|
 
-`BrandFacade`는 삭제되지 않은 Product가 연결되어 있는지 `ProductRepository`로 조회하고 그 결과를 `BrandModel.delete(hasActiveProducts)`에 전달한다. BrandModel은 활성 Product가 하나라도 있으면 재고가 0이어도 삭제를 거절한다. interfaces 계층은 이 도메인 오류를 `409 BRAND_HAS_ACTIVE_PRODUCTS` 응답으로 변환한다.
+`BrandFacade`가 Brand와 연결된 모든 미삭제 Product를 같은 트랜잭션에서 Soft Delete한다. 재고 0인 상품도 포함하고, 연결 상품이 없는 활성 Brand도 성공한다. 상품 존재에 따른 `409 BRAND_HAS_ACTIVE_PRODUCTS`는 더 이상 이 API의 거절 사유가 아니다. 없는·이미 삭제된 Brand는 기존 `404 BRAND_NOT_FOUND`를 유지한다. 다른 Brand·Product, 과거 주문의 품목·금액·결제 결과는 보존한다.
+
+중간 실패는 일부 성공으로 응답하지 않으며 이번 요청의 Brand·Product 변경을 모두 rollback한다. 상세 호출 순서, 삭제 이후 행동, 동시성 보장 한계와 성능 재검토 기준은 [4.1](./04-use-cases.md#41-브랜드와-연관-상품-일괄-삭제)을 따른다. 이번에는 상품 수 상한이나 비동기 접수 응답을 추가하지 않는다.
 
 ### 상품·재고
 
@@ -291,7 +293,10 @@ Soft Delete된 Brand와 Product를 관리자 목록·상세에 포함할지는 �
 |포인트 부족|주문 총액보다 포인트가 적음|`409 INSUFFICIENT_POINT`, 주문·포인트·재고·History 유지|
 |재고 부족|한 품목의 재고가 주문 수량보다 적음|`409 INSUFFICIENT_STOCK`, 주문·포인트·모든 재고·History 유지|
 |주문 중복 확정|이미 `CONFIRMED`인 주문 확정|`409 ORDER_NOT_CONFIRMABLE`, 모든 상태 유지|
-|브랜드 삭제 조건|재고 0인 활성 Product가 연결된 Brand 삭제|`409 BRAND_HAS_ACTIVE_PRODUCTS`, Brand 유지|
+|브랜드 일괄 삭제|재고 0과 양수인 미삭제 Product가 연결된 Brand 삭제|`200 OK`, Brand와 연결 미삭제 Product 삭제·비노출, 다른 대상과 과거 주문 유지|
+|빈 브랜드 삭제|연결 Product가 없는 활성 Brand 삭제|`200 OK`, Brand 삭제|
+|브랜드 삭제 중간 실패|실제 Product bulk UPDATE 후 다음 Brand 저장 경계에서 예외|예외 전파, 새 DB 조회에서 Brand와 대상 Product 전체 원상태|
+|브랜드 삭제 후 DRAFT 확정|삭제 전 만든 DRAFT의 상품이 Brand 일괄 삭제됨|`404 PRODUCT_NOT_FOUND`, DRAFT·포인트·재고·History 유지|
 |상품 재고 변경|현재 수량 5, 최종 수량 2 요청|재고 2와 변경 전후 값을 가진 StockHistory 저장|
 |삭제 대상 재삭제|Soft Delete된 Brand 또는 Product 삭제|각각 `404 BRAND_NOT_FOUND`, `404 PRODUCT_NOT_FOUND`|
 |숫자 범위 초과|수량 합산이나 주문 총액 계산이 표현 범위를 초과|`400 NUMERIC_OVERFLOW`, 주문과 관련 상태를 저장하지 않음|
