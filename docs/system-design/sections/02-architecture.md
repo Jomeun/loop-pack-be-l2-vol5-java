@@ -137,6 +137,8 @@ public interface ProductQueryRepository {
 
 찾는 대상이 없을 때의 처리(예: NOT_FOUND)는 Repository가 아니라 호출자인 Facade가 판단한다.
 
+상태 변경에 필요한 비관적 잠금은 기존 일반 읽기 포트와 분리해 domain Repository에 명시한다. 주문 확정용 Order 단독 PK 잠금, 충전·결제용 사용자 Point 잠금, 상품 수정·삭제·최종 재고 설정용 Product 단건 잠금, 주문 확정용 여러 활성 Product의 ID 오름차순 잠금 계약을 추가한다. 구체 메서드 이름은 구현 시 정하고 JPA 잠금·SQL·힌트는 infrastructure에 둔다. 기존 상세·목록·DRAFT 생성·좋아요·잔액 조회까지 잠그지 않는다. 호출 Facade의 동일 트랜잭션에서 첫 Entity 조회부터 보호하며, 별도 commit·런타임 전략 전환·재시도 계층을 도입하지 않는다. 잠금 범위와 일반 단일 쿼리 → PK 힌트 → ID별 조회의 선택 기준은 [4.3](./04-use-cases.md#43-주문-확정)을 따른다.
+
 이 추상화로 Facade는 구체적인 저장·조회 구현에 직접 의존하지 않으며, Repository 인터페이스가 유지되는 범위에서는 구현 변경의 영향을 infrastructure에 제한할 수 있다. 테스트에서는 fake 구현을 연결해 업무 로직을 검증할 수 있지만, JPA의 영속성 동작은 실제 데이터베이스를 사용하는 테스트로 확인해야 한다. Domain Entity와 JPA Entity를 통합하고 JPA의 관리 Entity와 변경 감지 기능을 활용하는 선택도 유지하므로, 다른 저장 기술로 교체할 때 domain이나 Facade의 수정이 없다고 보장하지는 않는다. 대신 필요한 저장 행동을 domain의 Repository 인터페이스에 명시하고 infrastructure에 위임 코드를 작성해야 하는 비용을 받아들인다.
 
 ## 2.5 ArchUnit 검증 규칙

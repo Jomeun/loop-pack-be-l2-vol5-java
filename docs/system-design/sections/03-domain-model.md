@@ -78,6 +78,8 @@ flowchart LR
 
 Order는 `DRAFT`와 `CONFIRMED` 상태를 가진다. 주문 생성 시 `DRAFT`가 되며, 소유자의 주문 확정 과정에서 재고와 포인트 차감이 모두 성공하면 `CONFIRMED`로 전이한다. 이미 `CONFIRMED`인 주문은 다시 확정할 수 없다.
 
+동시 확정에서는 Order 행을 먼저 비관적으로 잠근 뒤 소유권·DRAFT를 확인한다. OrderItem은 생성 이후 변경 운영 경로가 없으므로 별도 쓰기 잠금 없이 같은 트랜잭션에서 복원하고, 생성 시 이미 합산된 Product당 한 품목의 수량을 사용한다. Point와 Product 행도 공통 잠금 계약으로 보호한 현재 상태에서 기존 행동·Change VO·History를 사용한다. 새 version 필드, 독립 Stock Entity, Point 검증 전용 모델이나 별도 동시성 프레임워크는 추가하지 않는다. 자원 획득·차감 순서와 보장 범위는 [4.3](./04-use-cases.md#43-주문-확정)에 둔다.
+
 Order는 주문 총액, 포인트 사용액과 결제액을 구분해 기록한다. 각 금액의 정의와 계산 규칙은 [5.1](./05-api-contract.md#51-공통-계약과-입력-정책)을 따르며, 구분해 저장하는 이유와 비용은 [부록 A.4](./appendix-decisions.md#a4-주문-금액과-결제-정보의-구분)에서 비교한다.
 
 재고·포인트의 유효성이나 주문 상태 전이처럼 모델 자신의 상태로 판단할 수 있는 규칙은 해당 모델이 지킨다. Brand는 자신의 삭제 상태를 변경하고, BrandFacade는 ProductRepository의 일괄 삭제와 Brand 삭제를 조율한다. Product의 bulk 경로는 개별 Entity 행동을 거치지 않으므로 변경 필드와 영속성 처리 조건을 [4.1](./04-use-cases.md#41-브랜드와-연관-상품-일괄-삭제)에 명시한다. OrderConfirmFacade는 Order·Point·Product처럼 여러 비즈니스 애그리게잇의 상태 변경을 조율하되 업무 규칙은 각 모델에 맡긴다. Brand 삭제 책임의 기존 결정과 전제 변경은 [부록 A.9](./appendix-decisions.md#a9-brand-삭제-규칙의-위치)에서 비교한다.

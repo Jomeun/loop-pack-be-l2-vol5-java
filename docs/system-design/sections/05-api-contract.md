@@ -61,7 +61,10 @@
 - 요청과 무관하게 서버 내부 데이터의 불변식이 깨진 경우에는 `500`을 사용한다. 예를 들어 존재하는 User에게 Point가 없으면 `500 POINT_NOT_INITIALIZED`로 응답한다.
 - 같은 HTTP 상태 안에서도 클라이언트가 실패 원인을 구분할 수 있도록 `PRODUCT_NOT_FOUND`, `LIKE_ALREADY_EXISTS`, `INSUFFICIENT_STOCK`과 같은 안정적인 업무 오류 코드를 사용한다. 기존 `ErrorType`을 유지하면서 각 업무 오류의 `HttpStatus`, 안정적인 코드와 기본 메시지를 추가한다. Domain은 발생한 업무 오류를 `CoreException`으로 표현하고, interfaces의 `ApiControllerAdvice`가 `ErrorType`의 정보를 사용해 실제 HTTP 응답을 생성한다.
 - Soft Delete된 Brand·Product는 활성 자원을 대상으로 하는 API에서 존재하지 않는 것으로 처리한다. 이미 삭제된 대상을 다시 삭제하는 요청도 각각 `404 BRAND_NOT_FOUND`, `404 PRODUCT_NOT_FOUND`로 응답한다.
-- 상태 변경 요청이 실패하면 해당 요청의 Entity·History 변경은 전체 rollback하여 최종 DB 상태에 남기지 않는다. 실패 전에 변경 SQL이 실행됐더라도 독립 commit이나 일부 성공으로 남기지 않는다.
+- commit 전 업무 거절·중간 처리 RuntimeException이 전파되면 해당 요청의 Entity·History 변경은 전체 rollback하여 최종 DB 상태에 남기지 않는다. 실패 전에 변경 SQL이 실행됐더라도 독립 commit이나 일부 성공으로 남기지 않는다.
+- DB 변경은 하나의 트랜잭션으로 전체 commit 또는 rollback한다. commit 중 통신 장애로 완료 여부를 확인하지 못한 경우에는 기술 오류로 처리하며 오류 응답만으로 rollback을 단정하지 않는다. 이 결과 불확실성의 장애 실험·복구 기능은 이번 구현·검증 범위에 추가하지 않는다.
+- deadlock·lock timeout·DB 저장/commit 등 기술 실패는 재고·Point 부족으로 바꾸지 않고 기존 HTTP 500과 `ErrorType.INTERNAL_ERROR` 처리를 유지한다. 현재 응답 `meta.errorCode`는 enum 이름이 아닌 `Internal Server Error`다. 내부 재시도나 새 충돌 오류 코드는 추가하지 않는다.
+- 재시도는 사용자가 재요청 여부를 결정하는 정책이다. 서버는 실패 확인 후 추가 재실행 없이 기존 오류 응답으로 요청을 종료하고, 재요청은 새 트랜잭션에서 현재 상태를 판단한다. 비관적 잠금 대기는 유지하므로 즉시 실패나 응답시간 상한을 보장하지 않으며 모든 업무 오류에 재요청을 요구하지 않는다. 상세 이유와 비용은 [부록 A.3.3](./appendix-decisions.md#a33-재시도설정검증의-경계)을 따른다.
 
 공통 식별·입력 형식 오류는 모든 API에 적용하며, API별 표의 대표 오류에서는 반복해 적지 않는다.
 
@@ -204,6 +207,8 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 
 1포인트는 1원으로 계산한다. 잔액 0은 유효하지만 충전 요청 0은 유효하지 않다. 공통 요청자 식별 단계에서 User 존재 여부를 확인하며, 존재하는 User에게 fixture로 함께 준비되어야 할 Point가 없으면 `PointFacade`는 새 Point를 만들지 않고 데이터 불변식 위반인 `500 POINT_NOT_INITIALIZED`로 응답한다. Point 조회·저장과 트랜잭션은 PointFacade가 담당하고, 충전 금액 검증과 잔액 변경은 PointModel이 담당한다.
 
+충전은 주문 결제와 같은 사용자 Point 행의 비관적 잠금에 참여해 보호된 잔액에서 변경·History를 같은 트랜잭션으로 저장한다. 일반 잔액 조회는 비잠금으로 유지한다.
+
 ### 주문
 
 |기능|Method & Path|입력|성공 결과|대표 오류|
@@ -219,6 +224,9 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 - 주문 확정은 저장된 OrderItem을 기준으로 처리한다. 고객이 소유한 `DRAFT` 주문만 확정할 수 있으며, 이미 확정된 주문은 `409 ORDER_NOT_CONFIRMABLE`로 거절한다.
 - 주문이 없거나 요청자가 소유자가 아니면 모두 `404 ORDER_NOT_FOUND`로 응답한다.
 - 포인트나 어느 한 상품의 재고가 부족하면 각각 `409 INSUFFICIENT_POINT`, `409 INSUFFICIENT_STOCK`으로 응답하고 주문 확정 과정의 모든 변경을 롤백한다.
+- 최초 확정의 소유권·DRAFT 확인부터 전체 commit까지 `Order → Point → Product(ID 오름차순)` 비관적 잠금 규칙을 적용한다. 동일 주문의 동시 확정은 성공 1건과 나머지 `ORDER_NOT_CONFIRMABLE`이며 추가 차감·History가 없다. 새 요청 키·성공 응답 재사용은 제공하지 않는다.
+- 상품 존재·삭제 여부는 잠금 조회로 다시 검증한다. Point 부족 등과 상품 삭제가 함께 있는 복합 오류의 기존 노출 순서는 별도 계약으로 보존하지 않는다. Point 검증·사용 후 상품 오류가 나더라도 해당 요청의 전체 변경은 rollback한다. 단독 상품 삭제 오류를 검증할 때에는 충분한 Point를 준비한다.
+- commit 전 업무 거절·중간 실패로 rollback된 요청 자신의 부분 변경은 남지 않지만 공유 자원에 대한 다른 성공 요청의 변경은 유지한다. 동일 주문 거절 뒤 공유 Order는 성공자의 CONFIRMED이며, 이미 CONFIRMED인 주문 거절도 기존 결제 결과를 유지한다. commit 중 통신 장애의 결과 불확실성은 5.1의 공통 실패 계약을 따른다. 상세 보호·쿼리 선택·검증 기준은 [4.3](./04-use-cases.md#43-주문-확정)을 따른다.
 
 ## 5.3 관리자 API
 
@@ -253,6 +261,7 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 - Product 수정은 Brand를 변경하지 않는다. 수정 요청에도 `brandId`를 받지 않으며 기존 관계를 유지한다.
 - 재고 변경의 `quantity`는 증감량이 아니라 변경 후의 최종 수량이다. Stock은 변경 전후 수량과 변경량을 담은 StockChange를 반환하고, `StockHistoryModel.changedByAdmin(productId, change)`가 관리자 변경 원인을 포함한 이력을 생성한다.
 - 삭제된 Product는 수정과 재고 변경의 대상이 될 수 없으며 `404 PRODUCT_NOT_FOUND`로 응답한다.
+- `ProductFacade.update/delete/changeStock`은 주문 차감과 같은 Product 행의 비관적 잠금 규칙에 참여한다. 대상 조회·잠금 후 기존 존재/활성·입력 검증 순서를 유지하며, 관리자 최종 설정은 보호된 현재 재고의 before/after로 StockHistory를 남긴다. 상품 수정·삭제는 재고 이력을 추가하지 않고 저장 주문의 단가·수량·금액을 바꾸지 않는다. 브랜드 bulk 경쟁까지 보장 범위를 확장하지 않는다.
 
 ### 주문 조회
 
@@ -291,12 +300,14 @@ Soft Delete된 Brand와 Product를 관리자 목록·상세에 포함할지는 �
 |DRAFT 주문 결제 정보|`DRAFT` 주문 상세 조회|주문 총액은 반환하고 포인트 사용액과 결제액은 `null`, 상태는 `DRAFT`|
 |주문 확정 성공|총액 7,000, 포인트 잔액 10,000, 충분한 재고|차감 후 포인트 잔액 3,000, 포인트 사용액 7,000, 결제액 7,000, 품목별 재고 차감, PointHistory와 품목별 StockHistory 저장, `CONFIRMED`|
 |포인트 부족|주문 총액보다 포인트가 적음|`409 INSUFFICIENT_POINT`, 주문·포인트·재고·History 유지|
-|재고 부족|한 품목의 재고가 주문 수량보다 적음|`409 INSUFFICIENT_STOCK`, 주문·포인트·모든 재고·History 유지|
+|재고 부족|충분한 Point, 한 품목의 재고가 주문 수량보다 적음|`409 INSUFFICIENT_STOCK`, 해당 요청의 주문·포인트·모든 재고·History 변경 없음|
 |주문 중복 확정|이미 `CONFIRMED`인 주문 확정|`409 ORDER_NOT_CONFIRMABLE`, 모든 상태 유지|
 |브랜드 일괄 삭제|재고 0과 양수인 미삭제 Product가 연결된 Brand 삭제|`200 OK`, Brand와 연결 미삭제 Product 삭제·비노출, 다른 대상과 과거 주문 유지|
 |빈 브랜드 삭제|연결 Product가 없는 활성 Brand 삭제|`200 OK`, Brand 삭제|
 |브랜드 삭제 중간 실패|실제 Product bulk UPDATE 후 다음 Brand 저장 경계에서 예외|예외 전파, 새 DB 조회에서 Brand와 대상 Product 전체 원상태|
-|브랜드 삭제 후 DRAFT 확정|삭제 전 만든 DRAFT의 상품이 Brand 일괄 삭제됨|`404 PRODUCT_NOT_FOUND`, DRAFT·포인트·재고·History 유지|
+|브랜드 삭제 후 DRAFT 확정|삭제 전 만든 DRAFT의 상품이 Brand 일괄 삭제되어 commit됨, 충분한 Point|`404 PRODUCT_NOT_FOUND`, 해당 요청의 차감·확정·History 없음, 저장 품목·금액 보존|
 |상품 재고 변경|현재 수량 5, 최종 수량 2 요청|재고 2와 변경 전후 값을 가진 StockHistory 저장|
 |삭제 대상 재삭제|Soft Delete된 Brand 또는 Product 삭제|각각 `404 BRAND_NOT_FOUND`, `404 PRODUCT_NOT_FOUND`|
 |숫자 범위 초과|수량 합산이나 주문 총액 계산이 표현 범위를 초과|`400 NUMERIC_OVERFLOW`, 주문과 관련 상태를 저장하지 않음|
+
+3주차 동시성·실제 SQL 뒤 기술 실패의 준비·실행·판정 기준은 [4.3.5](./04-use-cases.md#435-구현-단계-검증-계획)에 둔다. 대표 HTTP 오류는 DB 결과와 연결하되 경쟁 전체를 HTTP에서 중복 검증하지 않으며, 관련 유효 테스트·Checkstyle·ArchUnit은 유지한다. 이 표와 검증 계획은 아직 실행 결과가 아니다.
