@@ -17,12 +17,12 @@
 
 응답 본문이 있는 성공과 업무 오류는 기존 `ApiResponse<T>` 형식을 사용한다.
 
+응답 객체에서 값이 null인 필드는 기존 `JacksonConfig`의 `JsonInclude.Include.NON_NULL`에 따라 실제 JSON에서 생략한다. 이 규칙은 `data`, 성공 응답의 `meta.errorCode`·`meta.message`, DRAFT 주문의 결제 필드 등 응답 객체의 null 필드에 공통으로 적용한다. 아래 예시는 실제 JSON 형태이며, 표의 `null`·nullable 타입은 응답 객체의 값과 타입을 뜻한다.
+
 ```json
 {
   "meta": {
-    "result": "SUCCESS",
-    "errorCode": null,
-    "message": null
+    "result": "SUCCESS"
   },
   "data": {}
 }
@@ -40,7 +40,7 @@
 }
 ```
 
-실패 응답은 `meta.result`를 `FAIL`로 설정하고 안정적인 업무 오류 코드와 메시지를 제공하며, `data`는 `null`로 반환한다.
+실패 응답은 `meta.result`를 `FAIL`로 설정하고 안정적인 업무 오류 코드와 메시지를 제공한다. 응답 객체의 `data`는 null이며 실제 JSON에서는 생략한다.
 
 ```json
 {
@@ -48,13 +48,12 @@
     "result": "FAIL",
     "errorCode": "POINT_NOT_INITIALIZED",
     "message": "포인트 정보가 초기화되지 않았습니다."
-  },
-  "data": null
+  }
 }
 ```
 
 - 조회와 상태 변경은 `200 OK`, 새 Brand·Product·Like·Order 생성은 `201 Created`로 응답한다.
-- 삭제는 `200 OK`와 `data: null`로 응답해 공통 응답 형식을 유지한다.
+- 삭제는 `200 OK`와 데이터 없는 `ApiResponse`로 응답한다. 내부 `data` 값은 null이며 실제 JSON에서는 해당 필드를 생략한다.
 - 요청 형식과 값이 잘못된 경우 `400`, 대상이 없거나 접근할 수 없는 경우 `404`, 현재 상태나 중복 관계 때문에 수행할 수 없는 경우 `409`를 사용한다.
 - 경로 변수로 대상을 지정하는 수정·변경 요청에서 본문 값 검증과 대상 조회가 모두 필요하면 대상 존재 여부를 먼저 판단한다. 존재하지 않거나 삭제된 대상에 잘못된 본문을 보낸 요청은 `400`이 아니라 `404`로 응답한다. Controller는 본문의 값 규칙을 직접 판단하지 않고 값을 그대로 도메인에 전달하며, 값 규칙 위반은 대상을 특정한 뒤에 드러난다. 상품 수정·재고 변경과 브랜드 수정이 여기에 해당한다.
 - 생성 요청은 만들려는 대상이 아직 없으므로 이 순서를 적용하지 않고 각 API가 정한 순서를 따른다. 상품 등록은 본문의 `brandId`로 참조할 Brand를 먼저 조회하며, `brandId` 자체가 빠져 조회할 대상을 정할 수 없으면 `400 INVALID_REQUEST`로 거절한다. 주문 생성의 검증 순서는 [5.2](./05-api-contract.md#52-고객-api)의 주문 규칙에서 정한다.
@@ -143,7 +142,7 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 
 고객 상품 조회의 `stockQuantity`는 조회 시점의 현재 재고 수량이다. 상품 목록·상세와 내 좋아요 목록에서 같은 `ProductResponse`를 사용한다. 별도의 품절 여부 필드는 이번 구현에서 우선 제공하지 않으며, 필요 여부는 기획 확인이 필요한 잠정 정책이다. 조회 이후 재고가 변경될 수 있으므로 주문 확정 시에는 저장된 OrderItem을 기준으로 재고를 다시 검증한다.
 
-`usedPointAmount`와 `paymentAmount`는 `DRAFT` 주문에서 `null`이고 `CONFIRMED` 주문에서 확정 시 기록한 값을 반환한다. 상품 이름은 OrderItem의 주문 시점 스냅샷으로 저장하지 않으므로 주문 응답은 상품 식별자만 제공하며, 현재 Product 이름을 주문 당시 정보처럼 조합하지 않는다.
+`usedPointAmount`와 `paymentAmount`는 `DRAFT` 주문의 응답 객체에서 null이며 실제 JSON에서는 생략한다. `CONFIRMED` 주문에서는 확정 시 기록한 값을 반환한다. 상품 이름은 OrderItem의 주문 시점 스냅샷으로 저장하지 않으므로 주문 응답은 상품 식별자만 제공하며, 현재 Product 이름을 주문 당시 정보처럼 조합하지 않는다.
 
 각 API의 `ApiResponse.data` 타입은 다음과 같다.
 
@@ -220,7 +219,7 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 
 - 주문 품목은 하나 이상이어야 하며 각 요청 품목의 수량이 1 이상인지 먼저 검증한다. 그다음 같은 Product의 수량을 합산하고 표현 범위를 확인해 하나의 OrderItem으로 저장한다. 중복 품목을 거절하는 대안과 합산을 선택한 이유는 [부록 A.8](./appendix-decisions.md#a8-주문의-중복-상품-품목-처리)에서 비교한다.
 - 주문 생성 시 `OrderFacade`가 트랜잭션 안에서 활성 Product를 조회하고 요청한 Product가 모두 존재하는지 확인한 뒤 Order를 저장한다. 순수 Domain Service인 `OrderService`는 품목별 양수 수량 검증, 중복 수량 병합과 합산 오버플로 검증, 준비된 Product의 주문 당시 가격을 사용한 OrderItem·초안 Order 생성을 담당한다. 이 과정에서는 Product·재고·포인트를 변경하지 않는다.
-- `DRAFT` 주문의 포인트 사용액과 결제액은 아직 결제가 발생하지 않았으므로 `null`로 반환한다. `CONFIRMED` 주문에는 주문 확정 시 기록한 값을 반환한다.
+- `DRAFT` 주문의 포인트 사용액과 결제액은 아직 결제가 발생하지 않았으므로 응답 객체에서 null이며 실제 JSON에서는 생략한다. `CONFIRMED` 주문에는 주문 확정 시 기록한 값을 반환한다.
 - 주문 확정은 저장된 OrderItem을 기준으로 처리한다. 고객이 소유한 `DRAFT` 주문만 확정할 수 있으며, 이미 확정된 주문은 `409 ORDER_NOT_CONFIRMABLE`로 거절한다.
 - 주문이 없거나 요청자가 소유자가 아니면 모두 `404 ORDER_NOT_FOUND`로 응답한다.
 - 포인트나 어느 한 상품의 재고가 부족하면 각각 `409 INSUFFICIENT_POINT`, `409 INSUFFICIENT_STOCK`으로 응답하고 주문 확정 과정의 모든 변경을 롤백한다.
@@ -240,7 +239,7 @@ Spring Security 필터에서 거절되는 관리자 요청은 `403` 상태만 �
 |브랜드 등록|`POST /api-admin/v1/brands`|본문 `name`|`201`, 등록한 브랜드|`INVALID_BRAND_NAME`|
 |브랜드 상세|`GET /api-admin/v1/brands/{brandId}`|브랜드 ID|`200`, 활성 브랜드 상세|`BRAND_NOT_FOUND`|
 |브랜드 수정|`PUT /api-admin/v1/brands/{brandId}`|본문 `name`|`200`, 수정한 브랜드|`BRAND_NOT_FOUND`, `INVALID_BRAND_NAME`|
-|브랜드 삭제|`DELETE /api-admin/v1/brands/{brandId}`|브랜드 ID|`200`, 브랜드와 연결 미삭제 상품 삭제 완료, `data: null`|`BRAND_NOT_FOUND`|
+|브랜드 삭제|`DELETE /api-admin/v1/brands/{brandId}`|브랜드 ID|`200`, 브랜드와 연결 미삭제 상품 삭제 완료, JSON의 `data` 필드 생략|`BRAND_NOT_FOUND`|
 
 `BrandFacade`가 Brand와 연결된 모든 미삭제 Product를 같은 트랜잭션에서 Soft Delete한다. 재고 0인 상품도 포함하고, 연결 상품이 없는 활성 Brand도 성공한다. 상품 존재에 따른 `409 BRAND_HAS_ACTIVE_PRODUCTS`는 더 이상 이 API의 거절 사유가 아니다. 없는·이미 삭제된 Brand는 기존 `404 BRAND_NOT_FOUND`를 유지한다. 다른 Brand·Product, 과거 주문의 품목·금액·결제 결과는 보존한다.
 
@@ -297,7 +296,7 @@ Soft Delete된 Brand와 Product를 관리자 목록·상세에 포함할지는 �
 |삭제 상품 좋아요 취소|삭제 전 생성한 자신의 Like 취소|성공하고 Like 관계 삭제|
 |중복 주문 품목 합산|같은 상품을 수량 2와 3으로 요청|수량 5인 OrderItem 하나로 저장하고 총수량 기준으로 금액 계산|
 |주문 생성과 차감 분리|유효한 여러 품목으로 주문 생성|`DRAFT` 저장, 재고와 포인트는 유지|
-|DRAFT 주문 결제 정보|`DRAFT` 주문 상세 조회|주문 총액은 반환하고 포인트 사용액과 결제액은 `null`, 상태는 `DRAFT`|
+|DRAFT 주문 결제 정보|`DRAFT` 주문 상세 조회|주문 총액·DRAFT 상태 반환, 포인트 사용액과 결제액은 내부 null이며 JSON에서는 생략|
 |주문 확정 성공|총액 7,000, 포인트 잔액 10,000, 충분한 재고|차감 후 포인트 잔액 3,000, 포인트 사용액 7,000, 결제액 7,000, 품목별 재고 차감, PointHistory와 품목별 StockHistory 저장, `CONFIRMED`|
 |포인트 부족|주문 총액보다 포인트가 적음|`409 INSUFFICIENT_POINT`, 주문·포인트·재고·History 유지|
 |재고 부족|충분한 Point, 한 품목의 재고가 주문 수량보다 적음|`409 INSUFFICIENT_STOCK`, 해당 요청의 주문·포인트·모든 재고·History 변경 없음|
@@ -310,4 +309,4 @@ Soft Delete된 Brand와 Product를 관리자 목록·상세에 포함할지는 �
 |삭제 대상 재삭제|Soft Delete된 Brand 또는 Product 삭제|각각 `404 BRAND_NOT_FOUND`, `404 PRODUCT_NOT_FOUND`|
 |숫자 범위 초과|수량 합산이나 주문 총액 계산이 표현 범위를 초과|`400 NUMERIC_OVERFLOW`, 주문과 관련 상태를 저장하지 않음|
 
-3주차 동시성·실제 SQL 뒤 기술 실패의 준비·실행·판정 기준은 [4.3.5](./04-use-cases.md#435-구현-단계-검증-계획)에 둔다. 대표 HTTP 오류는 DB 결과와 연결하되 경쟁 전체를 HTTP에서 중복 검증하지 않으며, 관련 유효 테스트·Checkstyle·ArchUnit은 유지한다. 이 표와 검증 계획은 아직 실행 결과가 아니다.
+3주차 동시성·실제 SQL 뒤 기술 실패의 준비·실행·판정 기준은 [4.3.5](./04-use-cases.md#435-구현-단계-검증-계획)에 둔다. 대표 HTTP 오류는 DB 결과와 연결하되 경쟁 전체를 HTTP에서 중복 검증하지 않으며, 관련 유효 테스트·Checkstyle·ArchUnit은 유지한다. 이 표는 기대값을 정의하며 실행 결과를 대신하지 않는다. 브랜드 B1~B3는 2026-10-07 검증 완료했으며 근거·한계는 [4.1](./04-use-cases.md#41-브랜드와-연관-상품-일괄-삭제)에 둔다. 주문·동시성 O0~O5의 구현·검증은 미착수다.
