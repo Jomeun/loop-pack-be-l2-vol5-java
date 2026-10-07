@@ -5,6 +5,7 @@ import com.loopers.domain.product.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.time.ZonedDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -26,12 +27,12 @@ public class ProductRepositoryImpl implements ProductRepository {
     }
 
     @Override
-    public boolean existsActiveByBrandId(Long brandId) {
-        return productJpaRepository.existsByBrandIdAndDeletedAtIsNull(brandId);
+    public ProductModel save(ProductModel product) {
+        return productJpaRepository.save(product);
     }
 
     @Override
-    public ProductModel save(ProductModel product) {
-        return productJpaRepository.save(product);
+    public int softDeleteAllActiveByBrandId(Long brandId, ZonedDateTime deletedAt) {
+        return productJpaRepository.softDeleteAllActiveByBrandId(brandId, deletedAt);
     }
 }
