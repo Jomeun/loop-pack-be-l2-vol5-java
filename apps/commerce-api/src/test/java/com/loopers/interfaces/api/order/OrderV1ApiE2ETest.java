@@ -7,6 +7,8 @@ import com.loopers.domain.order.OrderStatus;
 import com.loopers.application.point.PointFacade;
 import com.loopers.domain.product.ProductModel;
 import com.loopers.domain.user.UserModel;
+import com.loopers.fixture.OrderStateReader;
+import com.loopers.fixture.OrderStateReader.ConfirmState;
 import com.loopers.fixture.ProductFixture;
 import com.loopers.fixture.UserFixture;
 import com.loopers.infrastructure.order.OrderJpaRepository;
@@ -62,6 +64,8 @@ class OrderV1ApiE2ETest {
     private ProductJpaRepository productJpaRepository;
     @Autowired
     private PointJpaRepository pointJpaRepository;
+    @Autowired
+    private OrderStateReader orderStateReader;
     @Autowired
     private DatabaseCleanUp databaseCleanUp;
 
@@ -297,6 +301,48 @@ class OrderV1ApiE2ETest {
                 () -> assertThat(response.getBody().meta().errorCode()).isEqualTo("ORDER_NOT_FOUND"),
                 () -> assertThat(pointJpaRepository.findByUserId(other.getId()).orElseThrow().getBalance())
                     .isEqualTo(10_000L)
+            );
+        }
+
+        @DisplayName("없는 주문의 확정은 404 ORDER_NOT_FOUND 로 거절하고 잔액·재고·이력을 바꾸지 않는다.")
+        @Test
+        void rejectsUnknownOrder() {
+            UserModel user = userFixture.createUserWithPoint();
+            pointFacade.charge(user.getId(), 10_000L);
+            ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
+            ConfirmState before = orderStateReader.confirmState(999_999L, user.getId(), List.of(shirt.getId()));
+
+            ResponseEntity<ApiResponse<OrderV1Dto.OrderResponse>> response = testRestTemplate.exchange(
+                ENDPOINT + "/999999/confirm", HttpMethod.POST, request(null, user.getId()), ORDER_TYPE);
+
+            assertAll(
+                () -> assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND),
+                () -> assertThat(response.getBody().meta().errorCode()).isEqualTo("ORDER_NOT_FOUND"),
+                () -> assertThat(orderStateReader.confirmState(999_999L, user.getId(), List.of(shirt.getId())))
+                    .isEqualTo(before)
+            );
+        }
+
+        @DisplayName("주문 생성 뒤 상품이 삭제되면 확정을 404 PRODUCT_NOT_FOUND 로 거절하고 주문·잔액·재고·이력을 유지한다.")
+        @Test
+        void rejectsDeletedProduct() {
+            UserModel user = userFixture.createUserWithPoint();
+            pointFacade.charge(user.getId(), 10_000L);
+            ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
+            OrderModel order = orderFacade.create(user.getId(), List.of(new OrderItemCommand(shirt.getId(), 2L)));
+            productFixture.deleteProduct(shirt.getId());
+            ConfirmState before = orderStateReader.confirmState(order.getId(), user.getId(), List.of(shirt.getId()));
+
+            ResponseEntity<ApiResponse<OrderV1Dto.OrderResponse>> response = testRestTemplate.exchange(
+                ENDPOINT + "/" + order.getId() + "/confirm", HttpMethod.POST,
+                request(null, user.getId()), ORDER_TYPE);
+
+            assertAll(
+                () -> assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND),
+                () -> assertThat(response.getBody().meta().errorCode()).isEqualTo("PRODUCT_NOT_FOUND"),
+                () -> assertThat(before.order().get(1)).isEqualTo(OrderStatus.DRAFT),
+                () -> assertThat(orderStateReader.confirmState(order.getId(), user.getId(), List.of(shirt.getId())))
+                    .isEqualTo(before)
             );
         }
     }

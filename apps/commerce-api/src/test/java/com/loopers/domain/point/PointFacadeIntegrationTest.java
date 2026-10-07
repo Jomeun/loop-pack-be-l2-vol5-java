@@ -2,6 +2,7 @@ package com.loopers.domain.point;
 
 import com.loopers.application.point.PointFacade;
 import com.loopers.domain.user.UserModel;
+import com.loopers.fixture.LockProbe;
 import com.loopers.fixture.UserFixture;
 import com.loopers.infrastructure.point.PointHistoryJpaRepository;
 import com.loopers.infrastructure.point.PointJpaRepository;
@@ -14,8 +15,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,10 +37,20 @@ class PointFacadeIntegrationTest {
     @Autowired
     private PointHistoryJpaRepository pointHistoryJpaRepository;
     @Autowired
+    private PointRepository pointRepository;
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+    @Autowired
+    private LockProbe lockProbe;
+    @Autowired
     private DatabaseCleanUp databaseCleanUp;
 
+    /** LockProbe 확인 스레드 종료를 확인하지 못했으면 살아 있는 트랜잭션이 남았을 수 있어 TRUNCATE 를 보류하고 실패시킨다. */
     @AfterEach
     void tearDown() {
+        if (!lockProbe.allThreadsTerminated()) {
+            throw new IllegalStateException("LockProbe 확인 스레드 종료 미확인: TRUNCATE 를 보류했다");
+        }
         databaseCleanUp.truncateAllTables();
     }
 
@@ -149,6 +162,56 @@ class PointFacadeIntegrationTest {
                 .extracting("errorType")
                 .isEqualTo(ErrorType.POINT_NOT_INITIALIZED);
             assertThat(pointJpaRepository.findByUserId(user.getId())).isEmpty();
+        }
+    }
+
+    @DisplayName("Point 잠금 범위")
+    @Nested
+    class PointLock {
+        private static final String LOCK_POINT = "SELECT id FROM point WHERE id = ? FOR UPDATE NOWAIT";
+
+        @DisplayName("변경용 조회는 사용자의 Point 행을 트랜잭션이 끝날 때까지 잠근다.")
+        @Test
+        void locksPointRowForUpdate() {
+            UserModel user = userFixture.createUserWithPoint();
+            Long pointId = pointJpaRepository.findByUserId(user.getId()).orElseThrow().getId();
+
+            LockProbe.Result whileLocked = transactionTemplate.execute(status -> {
+                PointModel point = pointRepository.findByUserIdForUpdate(user.getId()).orElseThrow();
+                assertThat(point.getId()).isEqualTo(pointId);
+                return lockProbe.probe(LOCK_POINT, pointId);
+            });
+
+            assertAll(
+                () -> assertThat(whileLocked).isEqualTo(LockProbe.Result.LOCKED),
+                () -> assertThat(lockProbe.probe(LOCK_POINT, pointId)).as("트랜잭션 종료 후")
+                    .isEqualTo(LockProbe.Result.ACQUIRED)
+            );
+        }
+
+        @DisplayName("잔액 조회용 일반 조회는 Point 행을 잠그지 않는다.")
+        @Test
+        void keepsBalanceReadUnlocked() {
+            UserModel user = userFixture.createUserWithPoint();
+            Long pointId = pointJpaRepository.findByUserId(user.getId()).orElseThrow().getId();
+
+            LockProbe.Result duringRead = transactionTemplate.execute(status -> {
+                pointRepository.findByUserId(user.getId()).orElseThrow();
+                return lockProbe.probe(LOCK_POINT, pointId);
+            });
+
+            assertThat(duringRead).isEqualTo(LockProbe.Result.ACQUIRED);
+        }
+
+        @DisplayName("Point 가 없는 사용자의 변경용 조회는 비어 있다.")
+        @Test
+        void returnsEmptyWithoutPoint() {
+            UserModel user = userFixture.createUserWithoutPoint();
+
+            Optional<PointModel> found = transactionTemplate.execute(
+                status -> pointRepository.findByUserIdForUpdate(user.getId()));
+
+            assertThat(found).isEmpty();
         }
     }
 }

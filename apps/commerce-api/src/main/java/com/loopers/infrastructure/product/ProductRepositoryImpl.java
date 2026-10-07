@@ -27,6 +27,16 @@ public class ProductRepositoryImpl implements ProductRepository {
     }
 
     @Override
+    public Optional<ProductModel> findActiveForUpdate(Long productId) {
+        return productJpaRepository.findActiveForUpdateById(productId);
+    }
+
+    @Override
+    public List<ProductModel> findAllActiveByIdsForUpdate(Collection<Long> productIds) {
+        return productJpaRepository.findAllActiveForUpdateByIdIn(productIds);
+    }
+
+    @Override
     public ProductModel save(ProductModel product) {
         return productJpaRepository.save(product);
     }

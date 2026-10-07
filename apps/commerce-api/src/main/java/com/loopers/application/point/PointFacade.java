@@ -19,9 +19,11 @@ public class PointFacade {
     private final PointRepository pointRepository;
     private final PointHistoryRepository pointHistoryRepository;
 
+    /** 주문 결제와 같은 Point 행을 바꾸므로 첫 조회부터 잠근 현재 잔액에서 충전한다. */
     @Transactional
     public PointChange charge(Long userId, long amount) {
-        PointModel point = findPoint(userId);
+        PointModel point = pointRepository.findByUserIdForUpdate(userId)
+            .orElseThrow(() -> new CoreException(ErrorType.POINT_NOT_INITIALIZED));
         PointChange change = point.charge(amount);
 
         pointHistoryRepository.save(PointHistoryModel.charged(point.getId(), change));
@@ -31,10 +33,6 @@ public class PointFacade {
 
     @Transactional(readOnly = true)
     public PointModel getPoint(Long userId) {
-        return findPoint(userId);
-    }
-
-    private PointModel findPoint(Long userId) {
         return pointRepository.findByUserId(userId)
             .orElseThrow(() -> new CoreException(ErrorType.POINT_NOT_INITIALIZED));
     }

@@ -4,6 +4,7 @@ import com.loopers.application.order.OrderFacade;
 import com.loopers.domain.common.Money;
 import com.loopers.domain.product.ProductModel;
 import com.loopers.domain.user.UserModel;
+import com.loopers.fixture.OrderStateReader;
 import com.loopers.fixture.ProductFixture;
 import com.loopers.fixture.UserFixture;
 import com.loopers.infrastructure.order.OrderJpaRepository;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,6 +43,8 @@ class OrderFacadeIntegrationTest {
     private ProductJpaRepository productJpaRepository;
     @Autowired
     private PointJpaRepository pointJpaRepository;
+    @Autowired
+    private OrderStateReader orderStateReader;
     @Autowired
     private DatabaseCleanUp databaseCleanUp;
 
@@ -68,7 +72,10 @@ class OrderFacadeIntegrationTest {
             assertAll(
                 () -> assertThat(saved.getStatus()).isEqualTo(OrderStatus.DRAFT),
                 () -> assertThat(saved.getOrderTotal()).isEqualTo(Money.of(7_000L)),
-                () -> assertThat(saved.getUserId()).isEqualTo(user.getId())
+                () -> assertThat(saved.getUserId()).isEqualTo(user.getId()),
+                () -> assertThat(orderStateReader.orderRow(created.getId())).isEqualTo(Arrays.asList(
+                    user.getId(), OrderStatus.DRAFT, 7_000L, null, null, List.of(
+                        List.of(shirt.getId(), 2L, 2_000L), List.of(pants.getId(), 1L, 3_000L))))
             );
         }
 
@@ -83,7 +90,9 @@ class OrderFacadeIntegrationTest {
             assertAll(
                 () -> assertThat(productJpaRepository.findById(shirt.getId()).orElseThrow().getStockQuantity())
                     .isEqualTo(10L),
-                () -> assertThat(pointJpaRepository.findByUserId(user.getId()).orElseThrow().getBalance()).isZero()
+                () -> assertThat(pointJpaRepository.findByUserId(user.getId()).orElseThrow().getBalance()).isZero(),
+                () -> assertThat(orderStateReader.stockHistoryRows()).isEmpty(),
+                () -> assertThat(orderStateReader.pointHistoryRows()).isEmpty()
             );
         }
 

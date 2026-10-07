@@ -57,7 +57,7 @@ public class ProductFacade {
     /** 브랜드 관계는 바꾸지 않는다. */
     @Transactional
     public ProductQueryResult update(Long productId, String name, Long price) {
-        ProductModel product = findActive(productId);
+        ProductModel product = findActiveForUpdate(productId);
         product.update(name, price);
         ProductModel updated = productRepository.save(product);
         return findDetail(updated.getId());
@@ -65,7 +65,7 @@ public class ProductFacade {
 
     @Transactional
     public void delete(Long productId) {
-        ProductModel product = findActive(productId);
+        ProductModel product = findActiveForUpdate(productId);
         product.delete();
         productRepository.save(product);
     }
@@ -73,15 +73,19 @@ public class ProductFacade {
     /** finalQuantity는 증감량이 아니라 변경 후의 최종 수량이다. */
     @Transactional
     public ProductModel changeStock(Long productId, Long finalQuantity) {
-        ProductModel product = findActive(productId);
+        ProductModel product = findActiveForUpdate(productId);
         StockChange change = product.changeStock(finalQuantity);
 
         stockHistoryRepository.save(StockHistoryModel.changedByAdmin(product.getId(), change));
         return productRepository.save(product);
     }
 
-    private ProductModel findActive(Long productId) {
-        return productRepository.findActive(productId)
+    /**
+     * 재고를 바꾸지 않는 수정·삭제도 같은 Product 행 전체를 저장하므로,
+     * 주문 확정과 직렬화되도록 첫 조회부터 잠근 현재 상태를 사용한다.
+     */
+    private ProductModel findActiveForUpdate(Long productId) {
+        return productRepository.findActiveForUpdate(productId)
             .orElseThrow(() -> new CoreException(ErrorType.PRODUCT_NOT_FOUND));
     }
 

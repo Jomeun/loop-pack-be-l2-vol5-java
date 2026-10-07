@@ -1,7 +1,9 @@
 package com.loopers.infrastructure.product;
 
 import com.loopers.domain.product.ProductModel;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -15,6 +17,15 @@ public interface ProductJpaRepository extends JpaRepository<ProductModel, Long> 
     Optional<ProductModel> findByIdAndDeletedAtIsNull(Long id);
 
     List<ProductModel> findAllByIdInAndDeletedAtIsNull(Collection<Long> ids);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from ProductModel p where p.id = :id and p.deletedAt is null")
+    Optional<ProductModel> findActiveForUpdateById(@Param("id") Long id);
+
+    /** 일반 단일 잠금 쿼리(설계 4.3.3 1단계): 활성 조건, IN, ORDER BY id ASC, 잠금 절. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from ProductModel p where p.id in :ids and p.deletedAt is null order by p.id asc")
+    List<ProductModel> findAllActiveForUpdateByIdIn(@Param("ids") Collection<Long> ids);
 
     /**
      * {@code @Modifying} 의 flushAutomatically·clearAutomatically 는 켜지 않는다.
