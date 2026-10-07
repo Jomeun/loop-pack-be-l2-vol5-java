@@ -50,7 +50,7 @@ History 때문에 조건부 갱신이 불가능하다는 뜻은 아니다. 현�
 
 ### A.3.2 조회 형태와 보호 범위
 
-Order 행만 PK로 잠그고 소유권·DRAFT 확인 뒤 LAZY items를 별도 SELECT로 복원한다. EntityGraph는 fetch 계획이지 잠금 대상 지정이 아니며, 조인과 별칭 제한 없는 FOR UPDATE는 Item 행까지 잠글 수 있다. 현재 Item 수정 경로가 없어 쓰기 보호를 넓힐 이유가 없으므로 고정 1회 추가 조회를 수용한다. 특정 Hibernate 별칭 잠금 설정·native Order 쿼리를 추가하지 않고 기존 LAZY 매핑을 활용하며 실제 SQL은 구현 후 확인한다. 다른 주문과 Item 행이 공유되지 않으므로 잠금 확장이 곧 큰 경합 비용이라고 주장하지 않는다.
+Order 행만 PK로 잠그고 소유권·DRAFT 확인 뒤 LAZY items를 별도 SELECT로 복원한다. EntityGraph는 fetch 계획이지 잠금 대상 지정이 아니며, 조인과 별칭 제한 없는 FOR UPDATE는 Item 행까지 잠글 수 있다. 현재 Item 수정 경로가 없어 쓰기 보호를 넓힐 이유가 없으므로 고정 1회 추가 조회를 수용한다. 특정 Hibernate 별칭 잠금 설정·native Order 쿼리를 추가하지 않고 기존 LAZY 매핑을 활용했으며, 테스트에서 join 없는 Order 단독 `FOR UPDATE`와 별도 품목 SELECT를 확인했다. 다른 주문과 Item 행이 공유되지 않으므로 잠금 확장이 곧 큰 경합 비용이라고 주장하지 않는다.
 
 Product는 일반 `IN (...) ORDER BY id ASC` 단일 잠금 조회를 우선해 현재 일괄 조회 구조와 한 번의 왕복을 유지한다. 예상한 PK 오름차순 접근·별도 filesort 없음의 EXPLAIN 근거를 얻지 못하면 PK 힌트를 적용하고, 그래도 근거가 부족하면 ID별 오름차순 PK 조회로 전환한다. 구체 판정·실제 경쟁 검증은 4.3.3을 따른다. ORDER BY는 결과 순서이며 EXPLAIN은 계획 근거일 뿐 모든 잠금 순서·deadlock 부재의 보장은 아니다.
 
@@ -66,7 +66,7 @@ ID별 조회도 같은 트랜잭션에서 앞의 잠금과 connection을 종료�
 
 commit 전 업무 거절·중간 처리 RuntimeException 전파는 전체 rollback 계약이다. 실제 SQL 이후 실패 주입과 새 조회는 이 계약의 이행을 검증한다. commit 중 통신 장애로 완료 여부를 확인하지 못한 경우에는 기술 오류로 처리하되 오류 응답만으로 rollback을 단정하지 않는다. 이 결과 불확실성은 한계로만 기록하며 장애 실험·복구 기능을 이번 범위에 추가하지 않는다.
 
-실제 SQL 이후 실패 증거는 운영 실패 분기 없이 테스트 Repository spy의 flush 완료 뒤 기술 예외와 새 조회 경계로 확보한다. 갱신 유실 대조군과 실제 Facade 경쟁을 분리하고, 발제의 필수 수치·요청 집계·최종 Order/Item/Stock/Point/History·HTTP·회귀를 함께 확인한다. 상세 준비·실행·판정은 검토본이 아니라 [4.3](./04-use-cases.md#43-주문-확정)에 두며 아직 실행 결과는 없다.
+실제 SQL 이후 실패 증거는 운영 실패 분기 없이 테스트 Repository spy의 flush 완료 뒤 기술 예외와 새 조회 경계로 확보했다. 갱신 유실 대조군과 실제 Facade 경쟁을 분리하고, 발제의 필수 수치·요청 집계·최종 Order/Item/Stock/Point/History·HTTP·회귀를 함께 확인했다. 상세 준비·실행·판정은 [4.3](./04-use-cases.md#43-주문-확정)에, 실행 결과와 한계는 [4.3.5의 완료 근거](./04-use-cases.md#435-구현-단계-검증-계획)에 둔다.
 
 ## A.4 주문 금액과 결제 정보의 구분
 
