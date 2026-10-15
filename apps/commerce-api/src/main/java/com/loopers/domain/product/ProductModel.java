@@ -17,7 +17,16 @@ import lombok.Getter;
  * 외부 객체가 수량을 직접 변경하지 못하게 한다.
  */
 @Entity
-@Table(name = "product", indexes = @Index(columnList = "brand_id"))
+@Table(
+    name = "product",
+    indexes = {
+        @Index(columnList = "brand_id"),
+        // 고객 목록의 활성 조건 + 브랜드 필터 + 가격순(동점은 InnoDB 보조 인덱스에 포함되는 PK id 순)을 한 범위로 읽는다.
+        // 두 동등 조건(deleted_at IS NULL, brand_id = ?)의 순서는 이 범위에 영향이 없으므로,
+        // brand_id 로 시작하는 인덱스를 기존 단독 인덱스 하나로 유지하도록 deleted_at 을 앞에 둔다.
+        @Index(name = "idx_product_deleted_brand_price", columnList = "deleted_at, brand_id, price")
+    }
+)
 @Getter
 public class ProductModel extends BaseEntity {
 
