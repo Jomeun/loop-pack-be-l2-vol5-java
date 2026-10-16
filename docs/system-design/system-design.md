@@ -12,7 +12,7 @@
 
 2026-10-15 고객 상세의 상품명·Brand 이름·가격·재고만 JSON String cache-aside로 저장하고 좋아요 수는 DB 조회로 합성하기로 했다. 기본정보 영향 쓰기는 공통 afterCommit callback에서 commit 뒤 동기 DEL한다. TTL은 시험 10초/평시 5분의 고정값이며 hit에서 연장하지 않는다. 평시/일반 회귀는 cache on·필요한 캐시 비교만 DB-only, cold는 기본 miss+동시 miss 관측이다. 기존 master·초기 connect/command 200ms 실측·실패 로그/재시도 없음·기존 로컬 MySQL/Redis·loopers 공유를 사용하고 CPU 수집은 모두 제외한다. 구현된 SQL/포트/TX 경계와 확인한 데이터/표본은 [4.4 상품 조회](./sections/04-use-cases.md#44-상품-조회)와 연결된 실행 기록을 따른다.
 
-2026-10-15 상품 조회의 기능 구현·변경/실패/복구·회귀 검증을 완료했다. 목록 SQL은 유지하고 인덱스 2개를 추가했으며, 상세 기본정보 cache-aside와 영향 쓰기의 commit 뒤 DEL을 구현했다. 변경·rollback·DEL 실패·늦은 fill은 실제 Spring·MySQL·Redis 통합 테스트로, Redis 중단·재시작은 로컬 앱으로 확인했다. 최종 `cleanTest check`는 377건·fail/error/skip 0이다. 목록 전후 반복 지연·전체 응답 비교는 보완이 필요하고, 캐시의 전체 SQL 수·읽은 행 수 감소나 지연 향상은 입증되지 않았다. 글을 준비하며 SQL 실험과 남은 제출 근거를 보완한다. 구체 구성과 한계는 [4.4](./sections/04-use-cases.md#44-상품-조회)에 둔다.
+2026-10-15 상품 조회의 기능 구현·변경/실패/복구·회귀 검증을 완료했다. 목록 SQL은 유지하고 인덱스 2개를 추가했으며, 상세 기본정보 cache-aside와 영향 쓰기의 commit 뒤 DEL을 구현했다. 변경·rollback·DEL 실패·늦은 fill은 실제 Spring·MySQL·Redis 통합 테스트로, Redis 중단·재시작은 로컬 앱으로 확인했다. 최종 `cleanTest check`는 377건·fail/error/skip 0이다. 목록 전후 반복 지연·전체 응답 비교는 보완이 필요하고, 캐시의 전체 SQL 수·읽은 행 수 감소나 지연 향상은 입증되지 않았다. 글을 준비하며 SQL 실험과 남은 제출 근거를 보완한다. 2026-10-16 목록 전후 비교(E0)를 실제 API로 채웠고, 캐시 hit의 비싼 원본 호출 감소 조건은 미충족으로 판정해 정책을 유지했다. 구체 구성과 한계는 [4.4](./sections/04-use-cases.md#44-상품-조회)에 둔다.
 
 ## 문서 구성
 
