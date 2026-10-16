@@ -20,11 +20,13 @@ import lombok.Getter;
 @Table(
     name = "product",
     indexes = {
-        @Index(columnList = "brand_id"),
-        // 고객 목록의 활성 조건 + 브랜드 필터 + 가격순(동점은 InnoDB 보조 인덱스에 포함되는 PK id 순)을 한 범위로 읽는다.
-        // 두 동등 조건(deleted_at IS NULL, brand_id = ?)의 순서는 이 범위에 영향이 없으므로,
-        // brand_id 로 시작하는 인덱스를 기존 단독 인덱스 하나로 유지하도록 deleted_at 을 앞에 둔다.
-        @Index(name = "idx_product_deleted_brand_price", columnList = "deleted_at, brand_id, price")
+        // 브랜드 필터 + 가격순 목록. 동점은 보조 인덱스에 포함되는 PK id 순으로 정렬 없이 읽는다.
+        @Index(name = "idx_product_brand_price", columnList = "brand_id, price"),
+        // 브랜드 필터 + 최신순 목록.
+        @Index(name = "idx_product_brand_created", columnList = "brand_id, created_at"),
+        // 브랜드별 활성 상품 수(목록 total)를 상품 행을 읽지 않고 센다.
+        // 브랜드 일괄 삭제의 대상 탐색은 세 인덱스의 brand_id 선두 범위 중 옵티마이저가 고른다.
+        @Index(name = "idx_product_brand_deleted", columnList = "brand_id, deleted_at")
     }
 )
 @Getter
