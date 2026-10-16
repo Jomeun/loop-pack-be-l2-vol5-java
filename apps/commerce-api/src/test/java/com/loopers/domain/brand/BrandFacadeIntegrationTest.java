@@ -20,6 +20,7 @@ import com.loopers.domain.product.ProductSort;
 import com.loopers.domain.product.StockChangeCause;
 import com.loopers.domain.user.UserModel;
 import com.loopers.fixture.BrandFixture;
+import com.loopers.fixture.ProductDetailCacheCleanUp;
 import com.loopers.fixture.ProductFixture;
 import com.loopers.fixture.UserFixture;
 import com.loopers.infrastructure.brand.BrandJpaRepository;
@@ -109,10 +110,13 @@ class BrandFacadeIntegrationTest {
     private EntityManager entityManager;
     @Autowired
     private DatabaseCleanUp databaseCleanUp;
+    @Autowired
+    private ProductDetailCacheCleanUp productDetailCacheCleanUp;
 
     @AfterEach
     void tearDown() {
         databaseCleanUp.truncateAllTables();
+        productDetailCacheCleanUp.deleteAll();
     }
 
     /** 활성 조건 없이 새 트랜잭션에서 읽은 상품 행의 상태. */
