@@ -16,11 +16,13 @@
 
 ## 문서 구성
 
+PG 결제 전환의 목표 흐름과 API 계약을 정리했다. 신규 DRAFT의 결제 시작에서 재고를 확보하고, 외부 호출 뒤 검증한 결과를 별도 로컬 TX에 반영한다. 즉시 성공 응답·콜백·대사는 동일한 결과 반영을 사용한다. PG 저장 모델·클래스·잠금·TX와 주요 메서드 의사코드를 반영했다. 2026-10-22 사용자 검토로 payment 한 행·고정 주문 품목으로 확보/반환을 관리하고 별도 예약 테이블은 제거했으며 충돌만 payment_conflict에 분리했다. payment unique는 세 개이고 외부 주문 ID는 일반 인덱스·고정 매핑 검증을 사용한다. 확인 순번을 제거하고 최근 확인/마지막 충돌은 DB에 마지막 반영한 관찰로 정의했다. 업무 종결 보호와 source/terminalAtStart 구분은 유지한다. 2026-10-22 Claude 지적 1 검토 후 격리 수준은 유지하고 Order 부모 잠금으로 결제/충돌 쓰기를 직렬화하며 자식 선행 잠금 조회를 제거하기로 승인했다. 콜백은 별도 스칼라 식별 읽기를 끝낸 뒤 새 업무 TX의 Order 잠금부터 시작하고 최신 읽기 검증은 미실행이다. RestClient·Apache HttpClient 5와 Resilience4j Boot 연동·명시적 회로 호출을 선택했다. 2026-10-22 생성 회로 추가와 TX A 전 차단의 DRAFT 유지·TX A 후 확실한 미발송의 재고 반환/PAYMENT_FAILED를 승인했다. 생성/조회 분리·생성 표본 분류·실패 원인 CIRCUIT_REJECTED 명칭도 승인했으며 YAML 공통 초기 수치의 독립 적용·HALF_OPEN 최대 대기 10초도 승인했다. 2.8~2.9·A.32에서 정책 승인과 구현/실측 미완료를 구분한다. Boot YAML·registry 빈의 연결 책임도 반영했다. 통신 오류 분류·HTTP 제한과 추가 보호 범위·회로 초기 가설·PG 제어/기동/재시작·필수 검증과 관찰 기준까지 전체 초안을 작성했다. 2026-10-22 PG는 테스트 내부 HTTP fixture로 축소했고 별도 모듈/main/단독 기동·데모 DB는 제외했다. 제어 HTTP도 fixture 메서드로 축소하고 실제 결제/콜백 HTTP와 구분했다. 즉시 성공·정상 PENDING 후 SUCCESS/FAILED 콜백·실제 HTTP·재시작/자원 정리 검증은 유지한다. 초기 수치는 적은 호출과 짧은 대기로 상태 전이를 재현·관찰하기 위한 가설이며 운영 적정값은 아니다. 사용자 전체 검토는 완료했고 Claude 교차 검토의 지적 처리와 사용자 최종 승인은 남아 있다. 현재 POINT 코드를 이 목표 설계로 전환해야 한다. 아래 문서의 PG 내용은 아직 구현·검증 완료를 뜻하지 않으며, `[미정]` 항목은 구현 기준으로 임의 채택하지 않는다. 현재 POINT 구현의 과거 검사 결과는 PG 연동 검증 근거로 사용하지 않는다.
+
 |문서|담당 범위|
 |---|---|
 |[1. 버드뷰](./sections/01-overview.md)|시스템 개요, 구성과 기능 범위|
-|[2. 구조와 의존](./sections/02-architecture.md)|패키지 구조, 레이어 역할, 의존 방향, Repository와 명명 규칙|
-|[3. 도메인 관계](./sections/03-domain-model.md)|도메인 모델, 관계와 책임, 클래스 설계, 삭제 정책|
-|[4. 대표 흐름](./sections/04-use-cases.md)|브랜드·상품 일괄 삭제, 포인트 충전·주문 확정, 상품 조회·상세 캐시의 장애 계약과 검증 기준·완료 근거|
-|[5. API 계약과 주요 규칙](./sections/05-api-contract.md)|공통 계약, 고객·관리자 API, 테스트 기대값|
-|[부록 A. 설계 대안과 선택 근거](./sections/appendix-decisions.md)|설계 대안 비교, 선택 이유와 비용|
+|[2. 구조와 의존](./sections/02-architecture.md)|패키지·의존·Repository, PG Facade·로컬 TX 담당 객체, HTTP/회로 초기값·테스트 내부 PG 서버 책임|
+|[3. 도메인 관계](./sections/03-domain-model.md)|도메인 관계·상태·저장 필드와 제약, POINT 데이터 보존·삭제 정책|
+|[4. 대표 흐름](./sections/04-use-cases.md)|PG 시작·콜백·대사의 잠금·TX·메서드 의사코드, 이전 POINT 기록과 기존 기능|
+|[5. API 계약과 주요 규칙](./sections/05-api-contract.md)|공통 계약, 고객·관리자·콜백 API, 로컬 PG HTTP·fixture 메서드 제어/컨텍스트 재시작 계약과 대표 기대값|
+|[부록 A. 설계 대안과 선택 근거](./sections/appendix-decisions.md)|판단 근거·대안이 유리한 조건·숨은 비용·가정·재검토 조건. [PG 판단 색인](./sections/appendix-decisions.md#a29-pg-판단-근거-색인)|
