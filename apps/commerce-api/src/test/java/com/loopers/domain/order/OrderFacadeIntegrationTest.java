@@ -71,7 +71,7 @@ class OrderFacadeIntegrationTest {
             OrderModel saved = orderJpaRepository.findById(created.getId()).orElseThrow();
             assertAll(
                 () -> assertThat(saved.getStatus()).isEqualTo(OrderStatus.DRAFT),
-                () -> assertThat(saved.getOrderTotal()).isEqualTo(Money.of(7_000L)),
+                () -> assertThat(saved.getTotalAmount()).isEqualTo(Money.of(7_000L)),
                 () -> assertThat(saved.getUserId()).isEqualTo(user.getId()),
                 () -> assertThat(orderStateReader.orderRow(created.getId())).isEqualTo(Arrays.asList(
                     user.getId(), OrderStatus.DRAFT, 7_000L, null, null, List.of(
@@ -111,7 +111,7 @@ class OrderFacadeIntegrationTest {
             assertAll(
                 () -> assertThat(items).hasSize(1),
                 () -> assertThat(items.get(0).getQuantity()).isEqualTo(5L),
-                () -> assertThat(created.getOrderTotal()).isEqualTo(Money.of(5_000L))
+                () -> assertThat(created.getTotalAmount()).isEqualTo(Money.of(5_000L))
             );
         }
 
@@ -201,7 +201,7 @@ class OrderFacadeIntegrationTest {
             OrderModel reloaded = orderFacade.getOrder(user.getId(), created.getId());
             assertAll(
                 () -> assertThat(reloaded.getItems().get(0).getUnitPrice()).isEqualTo(Money.of(2_000L)),
-                () -> assertThat(reloaded.getOrderTotal()).isEqualTo(Money.of(4_000L))
+                () -> assertThat(reloaded.getTotalAmount()).isEqualTo(Money.of(4_000L))
             );
         }
     }

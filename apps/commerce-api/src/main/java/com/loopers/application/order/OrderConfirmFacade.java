@@ -58,7 +58,7 @@ public class OrderConfirmFacade {
         // Point 부족 요청이 공유 Product 잠금을 얻기 전에 끝나도록 Point 를 먼저 잠그고 바로 사용한다.
         PointModel point = pointRepository.findByUserIdForUpdate(userId)
             .orElseThrow(() -> new CoreException(ErrorType.POINT_NOT_INITIALIZED));
-        PointChange pointChange = point.use(order.getOrderTotal().toWon());
+        PointChange pointChange = point.use(order.getTotalAmount().toWon());
 
         Map<Long, ProductModel> products = lockActiveProducts(items);
 

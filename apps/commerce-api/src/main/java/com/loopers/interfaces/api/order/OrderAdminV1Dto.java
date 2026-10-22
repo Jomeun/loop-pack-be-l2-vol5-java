@@ -31,13 +31,13 @@ public class OrderAdminV1Dto {
         List<AdminOrderItemResponse> items
     ) {
         public static AdminOrderResponse from(OrderModel order) {
-            Money paymentAmount = order.getPaymentAmount();
+            Money paymentAmount = order.getPaidAmount();
             return new AdminOrderResponse(
                 order.getId(),
                 order.getUserId(),
                 order.getStatus().name(),
-                order.getOrderTotal().toWon(),
-                order.getUsedPointAmount(),
+                order.getTotalAmount().toWon(),
+                order.getPointAmount(),
                 paymentAmount != null ? paymentAmount.toWon() : null,
                 order.getItems().stream().map(AdminOrderItemResponse::from).toList()
             );

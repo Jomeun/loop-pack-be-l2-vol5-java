@@ -104,8 +104,8 @@ class BrandRemovalTransactionIntegrationTest {
         List<List<Object>> items = order.getItems().stream()
             .map(item -> List.<Object>of(item.getProductId(), item.getQuantity(), item.getUnitPrice().toWon()))
             .toList();
-        return Arrays.asList(order.getStatus(), order.getOrderTotal().toWon(), order.getUsedPointAmount(),
-            order.getPaymentAmount() != null ? order.getPaymentAmount().toWon() : null, items);
+        return Arrays.asList(order.getStatus(), order.getTotalAmount().toWon(), order.getPointAmount(),
+            order.getPaidAmount() != null ? order.getPaidAmount().toWon() : null, items);
     }
 
     private List<List<Object>> likeRows() {

@@ -367,10 +367,10 @@ ENUM 목록 끝에 값을 추가하는 MODIFY는 MySQL 8.0 Reference Manual의 O
 |구분|대상|DB 타입|매핑 계약|
 |---|---|---|---|
 |기존 ENUM 열|`orders.status`, `stock_history.cause`|MySQL ENUM 유지·허용값 확장|기존 `@Enumerated(EnumType.STRING)` 유지. VARCHAR로 바꾸지 않음. point_history.cause는 변경 없음|
-|신규 enum VARCHAR 열|`orders.payment_method` VARCHAR(16) nullable, `payment.status` VARCHAR(16) NOT NULL, `payment.failure_kind` VARCHAR(32) nullable, `payment.verification_status` VARCHAR(16) NOT NULL, `payment_conflict.code` VARCHAR(48) NOT NULL|VARCHAR|`@Enumerated(EnumType.STRING)` + `@JdbcTypeCode(SqlTypes.VARCHAR)` + 표의 길이·nullable을 적은 `@Column`. Hibernate가 native ENUM을 고르지 않게 함|
+|신규 enum VARCHAR 열|`orders.payment_method` VARCHAR(16) nullable, `payment.status` VARCHAR(16) NOT NULL, `payment.failure_kind` VARCHAR(32) nullable, `payment.verification_status` VARCHAR(16) NOT NULL, `payment_conflict.code` VARCHAR(48) NOT NULL|VARCHAR, 값 CHECK 없음|enum 이름 문자열 `AttributeConverter`(`@Convert`) + 표의 길이·nullable을 적은 `@Column`. Hibernate가 native ENUM이나 값 CHECK를 만들지 않게 함. 알 수 없는 저장 값은 읽기 실패|
 |그 밖의 문자열 열|attempt_key, provider, provider_account, provider_order_id, transaction_key, observed_order_id·observed_transaction_key, observed_status|각 표의 타입|Java String이면 enum 매핑 없이 `@Column`의 길이·nullable. CHAR(36)·ASCII binary collation·TEXT처럼 기본 생성으로 나오지 않는 정의는 열 정의를 명시해 표와 일치시킴. Java enum으로 모델링한다면 위 신규 enum VARCHAR 규칙을 적용|
 
-`@JdbcTypeCode(SqlTypes.VARCHAR)`의 실제 생성 결과·validate 동작과 열 정의 명시의 결과는 구현 뒤 4.5의 스키마 타입 검증으로 확인한다. 타입 선택과 무관하게 SQL 타입·길이·nullable·collation은 각 표가 원본이다.
+**매핑 변경(2026-10-23 사용자 승인):** 처음 계획한 `@Enumerated(EnumType.STRING)` + `@JdbcTypeCode(SqlTypes.VARCHAR)`는 I3-1 스키마 검증에서 Hibernate 6.6이 VARCHAR enum 열마다 `CHECK (열 in (...))`를 자동 생성함을 확인했다. 이 CHECK는 위 표(CHECK는 payment의 amount > 0만)와 보존 전환 DB에 없고, enum 값 추가 때 CHECK도 바꿔야 하는 비용이 있다. 그래서 신규 enum 열은 이름 문자열 변환기로 매핑하고 허용값 결합은 도메인 guard로 보호한다. 대안인 값 CHECK 유지는 DB가 잘못된 값을 더 막지만 설계 표·전환 SQL에 같은 CHECK를 추가해야 한다. 열 정의 명시의 결과와 validate 동작은 4.5의 스키마 타입 검증으로 확인한다. 타입 선택과 무관하게 SQL 타입·길이·nullable·collation은 각 표가 원본이다.
 
 ### PaymentModel — payment
 

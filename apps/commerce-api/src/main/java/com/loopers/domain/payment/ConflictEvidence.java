@@ -17,6 +17,11 @@ public record ConflictEvidence(
             transaction.status(), null);
     }
 
+    /** 비교할 PG 값이 없는 충돌(로컬 미발송과 거래 결합의 공존 등). */
+    public static ConflictEvidence none() {
+        return new ConflictEvidence(null, null, null, null, null);
+    }
+
     public static ConflictEvidence ofCount(int count) {
         if (count < 2) {
             throw new IllegalArgumentException("복수 거래 건수는 2 이상");

@@ -81,7 +81,7 @@ class OrderTransactionIntegrationTest {
     /** 실패 주입 시점에 현재 트랜잭션에서 읽은 DB 값: [주문 상태, 포인트 사용액, 결제액, 잔액, 재고들, 주문 원인 History 수]. */
     private List<Object> readInCurrentTransaction(Long orderId, Long userId, List<Long> productIds) {
         Object[] order = (Object[]) entityManager.createNativeQuery(
-                "SELECT status, used_point_amount, payment_amount FROM orders WHERE id = :orderId")
+                "SELECT status, point_amount, paid_amount FROM orders WHERE id = :orderId")
             .setParameter("orderId", orderId)
             .getSingleResult();
         Number balance = (Number) entityManager.createNativeQuery(

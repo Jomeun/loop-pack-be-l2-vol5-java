@@ -48,7 +48,10 @@ public enum ErrorType {
     ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", "존재하지 않는 주문입니다."),
     ORDER_NOT_CONFIRMABLE(HttpStatus.CONFLICT, "ORDER_NOT_CONFIRMABLE", "확정할 수 없는 상태의 주문입니다."),
     INVALID_ORDER_ITEMS(HttpStatus.BAD_REQUEST, "INVALID_ORDER_ITEMS", "주문 품목은 하나 이상이어야 합니다."),
-    INVALID_ORDER_QUANTITY(HttpStatus.BAD_REQUEST, "INVALID_ORDER_QUANTITY", "주문 수량은 1 이상의 정수여야 합니다.");
+    INVALID_ORDER_QUANTITY(HttpStatus.BAD_REQUEST, "INVALID_ORDER_QUANTITY", "주문 수량은 1 이상의 정수여야 합니다."),
+
+    /** 결제 */
+    PAYMENT_ATTEMPT_CONFLICT(HttpStatus.CONFLICT, "PAYMENT_ATTEMPT_CONFLICT", "이미 다른 결제 요청에 사용됐거나 주문에 다른 결제 시도가 있습니다.");
 
     private final HttpStatus status;
     private final String code;

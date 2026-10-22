@@ -39,12 +39,12 @@ public class OrderV1Dto {
         List<OrderItemResponse> items
     ) {
         public static OrderResponse from(OrderModel order) {
-            Money paymentAmount = order.getPaymentAmount();
+            Money paymentAmount = order.getPaidAmount();
             return new OrderResponse(
                 order.getId(),
                 order.getStatus().name(),
-                order.getOrderTotal().toWon(),
-                order.getUsedPointAmount(),
+                order.getTotalAmount().toWon(),
+                order.getPointAmount(),
                 paymentAmount != null ? paymentAmount.toWon() : null,
                 order.getItems().stream().map(OrderItemResponse::from).toList()
             );

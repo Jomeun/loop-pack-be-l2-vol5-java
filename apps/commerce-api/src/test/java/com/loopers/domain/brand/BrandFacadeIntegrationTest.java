@@ -161,8 +161,8 @@ class BrandFacadeIntegrationTest {
         List<List<Object>> items = order.getItems().stream()
             .map(item -> List.<Object>of(item.getProductId(), item.getQuantity(), item.getUnitPrice().toWon()))
             .toList();
-        return Arrays.asList(order.getStatus(), order.getOrderTotal().toWon(), order.getUsedPointAmount(),
-            order.getPaymentAmount() != null ? order.getPaymentAmount().toWon() : null, items);
+        return Arrays.asList(order.getStatus(), order.getTotalAmount().toWon(), order.getPointAmount(),
+            order.getPaidAmount() != null ? order.getPaidAmount().toWon() : null, items);
     }
 
     @DisplayName("등록")
@@ -618,8 +618,8 @@ class BrandFacadeIntegrationTest {
                 () -> assertThat(likeJpaRepository.findByUserIdAndProductId(userId, removed.slipper().getId())).isPresent(),
                 () -> assertThat(orderRow(pastOrderId)).isEqualTo(removed.pastOrderBeforeRemoval()),
                 () -> assertThat(customerView.getStatus()).isEqualTo(OrderStatus.CONFIRMED),
-                () -> assertThat(customerView.getOrderTotal().toWon()).isEqualTo(10_000L),
-                () -> assertThat(customerView.getPaymentAmount().toWon()).isEqualTo(10_000L),
+                () -> assertThat(customerView.getTotalAmount().toWon()).isEqualTo(10_000L),
+                () -> assertThat(customerView.getPaidAmount().toWon()).isEqualTo(10_000L),
                 () -> assertThat(customerView.getItems()).singleElement()
                     .satisfies(item -> {
                         assertThat(item.getProductId()).isEqualTo(removed.shoes().getId());
@@ -627,7 +627,7 @@ class BrandFacadeIntegrationTest {
                         assertThat(item.getUnitPrice().toWon()).isEqualTo(10_000L);
                     }),
                 () -> assertThat(adminView.getId()).isEqualTo(pastOrderId),
-                () -> assertThat(adminView.getPaymentAmount().toWon()).isEqualTo(10_000L)
+                () -> assertThat(adminView.getPaidAmount().toWon()).isEqualTo(10_000L)
             );
         }
 

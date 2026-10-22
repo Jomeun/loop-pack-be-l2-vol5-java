@@ -47,7 +47,7 @@ class ProductCacheInvalidationIntegrationTest extends ProductCacheTestSupport {
     private List<Long> orderAmounts(Long orderId) {
         OrderModel order = orderJpaRepository.findWithItemsById(orderId).orElseThrow();
         OrderItemModel item = order.getItems().get(0);
-        return List.of(order.getOrderTotal().toWon(), item.getUnitPrice().toWon(), item.getQuantity());
+        return List.of(order.getTotalAmount().toWon(), item.getUnitPrice().toWon(), item.getQuantity());
     }
 
     private void assertNotFound(Long productId) {
