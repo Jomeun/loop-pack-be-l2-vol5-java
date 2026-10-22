@@ -26,6 +26,9 @@ dependencies {
 
     // ArchUnit
     testImplementation("com.tngtech.archunit:archunit:1.5.0")
+
+    // 테스트 PG fixture 의 콜백 전송 전용 client
+    testImplementation("org.apache.httpcomponents.client5:httpclient5")
 }
 
 plugins {
