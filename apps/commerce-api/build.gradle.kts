@@ -11,6 +11,10 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${project.properties["springDocOpenApiVersion"]}")
 
+    // PG HTTP·회로 (버전은 Boot/Cloud BOM 관리값)
+    implementation("org.apache.httpcomponents.client5:httpclient5")
+    implementation("io.github.resilience4j:resilience4j-spring-boot3")
+
     // security (관리자 API 접근 경계)
     implementation("org.springframework.boot:spring-boot-starter-security")
     testImplementation("org.springframework.security:spring-security-test")
@@ -26,9 +30,6 @@ dependencies {
 
     // ArchUnit
     testImplementation("com.tngtech.archunit:archunit:1.5.0")
-
-    // 테스트 PG fixture 의 콜백 전송 전용 client
-    testImplementation("org.apache.httpcomponents.client5:httpclient5")
 }
 
 plugins {
