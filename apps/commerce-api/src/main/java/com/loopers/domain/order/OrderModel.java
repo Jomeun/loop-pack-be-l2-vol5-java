@@ -83,6 +83,23 @@ public class OrderModel extends BaseEntity {
         return total;
     }
 
+    public void requireStoredItemsConsistent() {
+        if (items.isEmpty() || items.stream().anyMatch(item ->
+            item.getProductId() == null || item.getQuantity() < 1 || item.getUnitPrice() == null)) {
+            throw new CoreException(ErrorType.INTERNAL_ERROR, "저장된 주문 품목이 올바르지 않습니다.");
+        }
+        try {
+            if (!calculateTotal().equals(totalAmount)) {
+                throw new CoreException(ErrorType.INTERNAL_ERROR, "주문 총액이 고정 품목 합계와 다릅니다.");
+            }
+        } catch (CoreException failure) {
+            if (failure.getErrorType() == ErrorType.NUMERIC_OVERFLOW) {
+                throw new CoreException(ErrorType.INTERNAL_ERROR, "저장된 주문 품목 금액이 표현 범위를 넘습니다.");
+            }
+            throw failure;
+        }
+    }
+
     public List<OrderItemModel> getItems() {
         return Collections.unmodifiableList(items);
     }

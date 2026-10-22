@@ -972,3 +972,25 @@ I1 fixture·I2 adapter·I3 저장/TX 위에 confirm·callback·reconcile과 고�
 |OrderV1ApiE2ETest·CustomerPurchaseFlowE2ETest의 입력 없는 신규 POINT 결제|UUID/합성 카드 입력·PG payment 응답·200/202, 충전 잔액 유지로 전환. 비소유·없는 주문·재고 부족/삭제·과거 POINT 확정 오류는 유지|
 
 I4의 기본 API 연결 완료이며 4.5 전체 검증 완료는 아니다. I5의 callback-first/조회 시작·반영 역전 장벽, 실제 풀 점유와 미발송의 업무 연결, 같은 PG·DB를 유지한 commerce 컨텍스트 재시작, 전체 V 항목의 남은 조건과 글 실험은 별도로 검증해야 한다. 일반 회귀 통과를 이 조건들의 대체 근거로 사용하지 않는다.
+
+
+### I5 경쟁·장애 회복·재시작 검증 근거 — 2026-10-23
+
+I4 커밋 `58b5faf`와 마지막 검증 소스가 같음을 확인하고, 실제 HTTP·Facade 오류 경계·ArchUnit 30건을 다시 실행해 통과한 뒤 I5를 시작했다. 구현 종료 시 I5 변경은 스테이징하지 않았다. 이후 사용자의 추가 요청으로 I5 코드·테스트와 기준 설계의 검증 기록을 스테이징했으며, 커밋은 사용자가 직접 수행한다. 제품의 timeout·풀/회로 초기값·격리 수준·한 시도/재발송 금지 계약은 유지했다.
+
+**제품 보완:** 저장 품목 없음·수량 0·고정 품목 합계 불일치의 실제 MySQL 사례가 기존 코드에서 모두 202로 진행되는 것을 먼저 재현했다(3건 실패). OrderModel.requireStoredItemsConsistent가 저장 품목·양수 수량·합계를 검사하고, 기존 PaymentTransactionService의 신규 준비와 저장 결제 정합성 경계에서 호출하도록 최소 보완했다. 저장 값의 산술 overflow도 내부 정합성 오류로 다루며 확인/반영 전에 500으로 중단한다. 이는 3.6·4.3에 있던 검사를 구현한 것이며 새 정책이 아니다. 동일 3건과 TX/부모 잠금 회귀로 500·PG 조회 0·결제/재고 변화 0을 확인했다.
+
+|I5 단위·경계|구현·실제 관측|
+|---|---|
+|I5-1 실제 복구·경쟁·오류|PaymentRecoveryFlowIntegrationTest 30건. 정상 PENDING→SUCCESS/FAILED 단일 콜백의 기대 200 ACK 뒤 새 API/DB·정확한 PG/포인트/이력 수량, 생성 응답 유실의 callback-first/lookup-first 수렴, 즉시 성공 뒤 같은/반대 종결 콜백, 같은 주문의 다른 거래·금액 복합 충돌, 위조 A/B/C의 실제 권위 GET/회로 표본, 빈/2건/3건/혼합 목록·직접 대상 위반을 확인했다. 실제 InnoDB LOCK WAIT를 관측한 callback/reconcile 실패 반환 경쟁은 반환 1회, 두 주문의 동일 거래 unique 경쟁은 패자 TX rollback 뒤 별도 TRANSACTION_ALREADY_BOUND commit·409다. PG DELAY 중 DB pool active=0·관리자 변경 선완료를 확인했고, 반환은 현재 가용 재고에 가산했다. overflow·물리/논리 삭제·품목 누락·요약 SQL 뒤 실패의 상태 보존도 확인했다|
+|I5-1/2 반환 캐시|PaymentReleaseCacheIntegrationTest 2건. 실제 반환 SQL 뒤 commit 전에는 이전 cache를 유지하고 DEL 0, commit 후 DEL 1·새 가용량 조회, rollback은 DB/캐시 유지·DEL 0이다|
+|I5-2 생성/조회 장애와 업무 효과|PgPaymentResilienceIntegrationTest 13건. 사전 확인 뒤 actual OPEN/HALF_OPEN 거절은 본문 미진입·POST 0·CIRCUIT_REJECTED·반환 1회. 본문 안/장식 전 대조 오류는 표본/관찰 합성/TX B 0·500·UNKNOWN/예약 유지다. 정상 응답 뒤 decoder 프로그램 오류도 저장 확인 정보를 덮지 않는다. GATE 10개와 Apache 실제 leased=10을 관측한 뒤 조회와 생성의 풀 획득 실패를 읽기 timeout보다 먼저 끝내고 점유 요청 미완료를 확인했다. 생성은 POOL_ACQUIRE_TIMEOUT·표본/거래 0·반환 1회, 조회는 UNAVAILABLE·반환 0이며 반환 SQL rollback과 이후 0건 조회의 UNKNOWN 보존도 확인했다. gate 해제 후 leased/pending=0·점유 요청 200을 확인했다. 읽기 지연/본문 중단 뒤 연결 반환·재시도 0, 실제 연결 거절의 UNKNOWN 보존, 사전 차단 직전 다른 TX가 commit한 결제 재확인도 검증했다|
+|I5-2 승인된 실제 시간|PaymentCircuitTimingIntegrationTest 7건. 빠른 성공 2+실패 3의 실패율 OPEN과 GET 차단, 실제 OPEN 5초 후 2회 탐색의 CLOSED/OPEN, 실패 없는 느린 성공 3/5의 OPEN, 실제 HTTP HALF_OPEN 두 슬롯과 세 번째 미수신, 승인 10초 만료의 PG/업무 자동 효과 0을 확인했다. 진행 작업 비취소만 별도 회로 계층의 허용된 100ms maxWait 대조이며 실제 HTTP 취소 근거가 아니다. TX A DB 대기 900ms는 pgCreate 느림 표본에 들어가지 않았다|
+|I5-3 재시작|PaymentRestartIntegrationTest 2건. 테스트 MySQL 별도 스키마와 같은 PG를 두 commerce context보다 오래 유지했다. 최초 create→두 번째 validate 사이 reset/TRUNCATE/재생성 없이 결제 전체 행/발송 시각/스키마 정의/확보 수량을 비교했다. 두 context는 기동 전 자기 포트/콜백 URL을 주입하고 실제 일치를 확인했다. 첫 client/회로/DB pool 종료·두 번째 새 instance, 저장 UNKNOWN 고객 조회→기존 주문별 reconcile로 동일 거래 종결·추가 POST 0을 확인했다. TX A 직후 외부 생성 전 중단 대조는 거래 0건이므로 UNKNOWN/예약 유지·202이며 재발송하지 않는다. 저장된 첫 callback URL을 수정하거나 이전 주소로 받지 않는다|
+|I5-4 독립 TX/SQL·정리|PaymentOverlapEvidenceIntegrationTest 2건. 서로 다른 두 실제 CONNECTION_ID를 확보한 두 TX가 payment 또는 payment_conflict 조회 후 INSERT 직전 모두 대기하는 동안 해당 INSERT SQL 0·테이블 행 0·양쪽 미완료를 확인하고, 해제 뒤 각각 commit·2행·정확한 재고를 확인했다. I3의 첫 업무 SQL/최신 읽기/관찰 순서/스키마 전환 검증도 전체 회귀에서 실행했다. I5 HTTP 사례마다 새 fixture/회로/context를 사용하며, caller·실제 servlet 요청이 모두 종료된 뒤 정리하고 context 종료 후 PG HTTP/콜백 worker와 DB pool 종료를 직접 assert한다|
+
+**실행 버전과 수량:** 제품 보완과 I5 기본 구현을 포함한 전체 commerce-api 회귀는 **805건·fail/error/skip 0**(ArchUnit 3 포함), Checkstyle 위반 0으로 통과했다. 이후 테스트에만 독립 INSERT SQL 근거 2건·사전 차단 경합 1건과 사례별 context/자원 종료 검사를 보강했다. 최종 I5 전체 **56건·fail/error/skip 0**, Checkstyle main 157파일·test 118파일 위반 0을 확인했다. 추가로 transport fault를 주입한 PgCreateFailureClassificationTest 5건을 별도 실행해 socket timeout·interrupt·취소를 감싼 I/O·이름만 풀 오류인 I/O·lease timeout 하위 타입이 모두 UNAVAILABLE/실패 1이며 LOCAL_NOT_DISPATCHED가 아님을 확인했다. 이 5건은 실제 네트워크 취소 실측이 아닌 타입 경계 대조다. 최종 Checkstyle test 119파일 위반 0이다. 운영 소스는 이 실행들 사이 변경 0이며, 서로 겹치는 건수를 최종 단일 전체 실행으로 합산하지 않는다. 전체 805건은 3분 57초, 최종 I5 56건은 2분 29초였다.
+
+전체 실행은 `./gradlew :apps:commerce-api:test :apps:commerce-api:checkstyleMain :apps:commerce-api:checkstyleTest --offline`, 최종 보강 실행은 6개 I5 테스트 클래스 필터와 같은 Checkstyle task다. 전체 XML은 `/tmp/codex-i5-evidence/full-xml/`, 최종 XML은 `final-i5-xml/`, 실행별 집계·class/운영 소스·최종 소스 해시도 같은 디렉터리에 보존했다. build/test-results/test는 마지막 분류 대조 5건만 담으며 56건은 final-i5-xml/, 분류 5건은 classification-final-xml/에 보존했다. Java/테스트 외 기존 데이터 전환은 테스트 컨테이너의 별도 스키마에서만 실행했으며 실제 보존 대상 로컬 DB를 전환한 것이 아니다.
+
+**최종 구성과 한계:** 별도 독립 probe에서 실제 Apache client의 connect/socket/pool/response 제한 300/1000/200/1000ms·총/경로별 10, redirect=false, 실행 체인 `[ContentCompressionExec, ProtocolExec, ConnectExec, MainClientExec]`를 확인했다(자동 retry/redirect 실행 없음). 실제 로드된 Resilience4j는 2.2.0이다. 연결 거절은 재현했지만 별도 통제 네트워크에서의 실제 connect timeout은 재현하지 않았으며 300ms 설정 적용과 구분한다. 단일 실행 결과를 운영 적정값·장시간 안정성·무작위 경합/부하 시험으로 확대하지 않는다. I2/I3 전체 코드 교차 검토·글 비교 실험·실제 제출은 이 실행 완료와 별개다.

@@ -260,9 +260,7 @@ public class PaymentTransactionService {
         if (order.getPaymentMethod() == PaymentMethod.PG) {
             throw new CoreException(ErrorType.INTERNAL_ERROR, "PG 결제 표시 주문에 결제 시도가 없습니다.");
         }
-        if (!order.calculateTotal().equals(order.getTotalAmount())) {
-            throw new CoreException(ErrorType.INTERNAL_ERROR, "주문 총액이 고정 품목 합계와 다릅니다.");
-        }
+        order.requireStoredItemsConsistent();
         if (paymentRepository.existsByAttemptKey(attemptKey)) {
             throw new CoreException(ErrorType.PAYMENT_ATTEMPT_CONFLICT);
         }
@@ -270,6 +268,7 @@ public class PaymentTransactionService {
 
     /** 주문·결제의 저장 연결과 상태 결합을 검사한다(설계 3.6 TX B 검사). 어긋나면 임의로 처리하지 않는다. */
     private void requireConsistent(OrderModel order, PaymentModel payment) {
+        order.requireStoredItemsConsistent();
         boolean linked = payment.getOrderId().equals(order.getId())
             && PaymentModel.PROVIDER.equals(payment.getProvider())
             && providerAccount.equals(payment.getProviderAccount())
