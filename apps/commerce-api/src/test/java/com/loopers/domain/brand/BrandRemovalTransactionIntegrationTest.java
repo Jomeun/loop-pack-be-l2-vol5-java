@@ -1,5 +1,7 @@
 package com.loopers.domain.brand;
 
+import com.loopers.fixture.PastPointOrderFixture;
+import com.loopers.application.order.OrderInfo;
 import com.loopers.application.brand.BrandFacade;
 import com.loopers.application.like.LikeFacade;
 import com.loopers.application.order.OrderConfirmFacade;
@@ -52,6 +54,9 @@ class BrandRemovalTransactionIntegrationTest {
 
     @MockitoSpyBean
     private BrandRepository brandRepository;
+
+    @Autowired
+    private PastPointOrderFixture pastPointOrders;
 
     @Autowired
     private BrandFacade brandFacade;
@@ -128,8 +133,8 @@ class BrandRemovalTransactionIntegrationTest {
         UserModel user = userFixture.createUserWithPoint();
         pointFacade.charge(user.getId(), 50_000L);
         likeFacade.like(user.getId(), shoes.getId());
-        OrderModel pastOrder = orderFacade.create(user.getId(), List.of(new OrderItemCommand(shoes.getId(), 1L)));
-        orderConfirmFacade.confirm(user.getId(), pastOrder.getId());
+        OrderInfo pastOrder = orderFacade.create(user.getId(), List.of(new OrderItemCommand(shoes.getId(), 1L)));
+        pastPointOrders.confirm(user.getId(), pastOrder.id());
 
         List<Object> nikeBefore = brandRow(nike.getId());
         List<Object> adidasBefore = brandRow(adidas.getId());
@@ -137,7 +142,7 @@ class BrandRemovalTransactionIntegrationTest {
         List<Object> soldOutBefore = productRow(soldOut.getId());
         List<Object> discontinuedBefore = productRow(discontinued.getId());
         List<Object> slipperBefore = productRow(slipper.getId());
-        List<Object> orderBefore = orderRow(pastOrder.getId());
+        List<Object> orderBefore = orderRow(pastOrder.id());
         List<List<Object>> likesBefore = likeRows();
 
         AtomicBoolean injectedInTransaction = new AtomicBoolean(false);
@@ -167,7 +172,7 @@ class BrandRemovalTransactionIntegrationTest {
             () -> assertThat(productRow(soldOut.getId())).isEqualTo(soldOutBefore),
             () -> assertThat(productRow(discontinued.getId())).isEqualTo(discontinuedBefore),
             () -> assertThat(productRow(slipper.getId())).isEqualTo(slipperBefore),
-            () -> assertThat(orderRow(pastOrder.getId())).isEqualTo(orderBefore),
+            () -> assertThat(orderRow(pastOrder.id())).isEqualTo(orderBefore),
             () -> assertThat(likeRows()).isEqualTo(likesBefore)
         );
     }

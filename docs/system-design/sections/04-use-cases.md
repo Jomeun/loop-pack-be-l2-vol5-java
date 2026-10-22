@@ -944,3 +944,31 @@ fixture의 sendCallbacks는 저장 거래의 정상 snapshot만 보내므로 변
 각 실행은 코드/설정 버전, 초기 데이터·plan·재현 순서, 예상/실제 HTTP·외부 거래 수, 주문·결제·고정 품목·가용 재고·포인트·확인 정보/별도 충돌 요약, 회로 표본/상태, 지연, 자원 종료와 미검증 조건을 기록한다. 실행 실패·0건·skip·인프라 연결 실패는 통과가 아니다. 실제 MySQL·Redis·controller 회귀와 Checkstyle·ArchUnit을 포함하고, 실패를 통과시키기 위한 보호 검사 삭제는 허용하지 않는다.
 
 구현 필수 검증과 글의 비교 실험은 구분한다. 필수 검증은 위 계약 준수 확인이다. 글은 구현 뒤 사용자와 축/대안을 정하고, 같은 요청열·PG 상태·지연·동시성·HTTP timeout을 통제한 채 한 설정 또는 명시한 상호작용을 바꿔 본다. 관찰 후보는 호출별 표본/실패율/느림/상태, 실제 PG GET 수, 차단/정상 요청 거절 수와 회복 지연이다. `COUNT_BASED`/`TIME_BASED`, 창 크기·최소 표본·느린 호출 임계값 등은 비교 후보이며 최종 실험값·횟수·결과를 지금 확정하지 않는다. 로컬 결과를 운영 일반론으로 확대하지 않는다.
+
+
+### I4 구현과 검증 근거 — 2026-10-23
+
+I1 fixture·I2 adapter·I3 저장/TX 위에 confirm·callback·reconcile과 고객/관리자 주문 응답을 연결했다. Facade에는 상위 TX가 없으며 `PaymentObservationApplier`가 공통 TX B 호출과 거래 unique rollback 후 별도 충돌 기록 호출을 맡는다. 충돌은 기록 TX가 반환한 뒤 409로 변환하며, 기술 오류를 확인 불가 관찰로 바꾸지 않는다. 주문 생성·조회·목록은 TX 안에서 OrderInfo로 복사하고 목록의 payment는 해당 페이지 ID로 일괄 조회한다.
+
+검증 대상은 `7a9723a` 이후 I4 변경이다. `./gradlew :apps:commerce-api:test :apps:commerce-api:checkstyleMain :apps:commerce-api:checkstyleTest --offline` 실행에서 **752건, 실패·오류·skip 0**을 확인했다(ArchUnit 3 포함). Checkstyle main 157파일·test 111파일 위반 0이며 main은 동일 소스의 직전 실제 검사 이후 UP-TO-DATE였다. 이후 캐시 테스트의 과거 주문 준비를 명시적 PG 즉시 성공과 CONFIRMED 검사로 보강하고 `--tests 'com.loopers.domain.product.ProductCacheInvalidationIntegrationTest'`와 checkstyleTest를 실행해 **9건·실패·오류·skip 0, 위반 0**을 확인했다. 두 실행 사이 Java 변경은 그 캐시 테스트 한 파일뿐이며 운영 코드는 동일하다. 전체 752건을 보강 후 다시 실행한 것으로 합산하지 않는다.
+
+|검증 경계|실제 근거와 기대값|
+|---|---|
+|실제 PG → adapter → MySQL → commerce HTTP|PgPaymentApiIntegrationTest 15건. 기동 전 commerce 포트/콜백 URL 동시 주입·실제 포트 일치 확인. Point 없는 PENDING/즉시 SUCCESS, 정확한 422 무효과 실패·반환, 생성 응답 유실 후 주문별 조회 복구, 같은 시도 재요청의 POST 추가 0, 입력/소유권/없는 시도 오류 확인|
+|명시적 콜백|실제 sendCallbacks의 SUCCESS 1건·FAILED 3건에서 기대 200 ACK를 받은 뒤 API/DB로 종결·금액·확보/반환 이력을 확인. 알림 상태와 권위 상태 불일치·미존재 거래 키·다른 주문 거래의 위조 알림은 별도 실제 HTTP로 확인. 콜백 data 생략·고객 헤더 불필요·중복 반환 0|
+|종결 후 대사·충돌 보존|저장 종결 뒤 조회 실패는 202/UNAVAILABLE·종결 유지, 종결 후 PENDING은 409/TERMINAL_REGRESSION·요약 commit. 식별 충돌도 409 뒤 저장 키/업무 상태/확보를 유지|
+|TX 경계와 실패 복구|실제 create/lookup 호출의 상위 TX 부재를 spy에서 확인. OrderTransactionIntegrationTest 3건은 TX A SQL 뒤 rollback/PG 0, PG SUCCESS 뒤 TX B SQL 실패의 500·UNKNOWN/확보 유지와 기존 거래 대사 복구, 실패 반환 SQL rollback 뒤 단 한 번 반환을 확인|
+|동시성과 회귀|OrderConcurrencyIntegrationTest 8건은 동일 주문 POST/확보 1회, 잔액과 무관한 다중 PG 결제·충전 병행, 재고 부족 경쟁·관리자 수량 설정·정보 수정·삭제·반대 품목 순서 경쟁을 확인. OrderConfirmFacadeIntegrationTest의 Order/Product 잠금 6건도 유지|
+|읽기·과거 POINT|고객/관리자 금액 필드 totalAmount/pointAmount/paidAmount·분리된 payment DTO·관리자 orderUrl/고객 reconcileUrl, 페이지 결제 1회 조회/개별 조회 0, PG 결제 행 누락의 500을 확인. 과거 POINT 주문의 구매자·품목·실제 금액·삭제 뒤 조회는 전용 과거 snapshot fixture와 기존 데이터 전환 검사로 유지|
+
+신규 POINT 결제 실행을 전제로 했던 사례의 전환 근거는 위 ‘기존 테스트의 유지·교체’ 계약이다. 다음 사례 외 소유권·재고·조회·잠금 보호를 삭제하거나 완화하지 않았다.
+
+|이전 사례|대체 사례|
+|---|---|
+|OrderConfirmFacadeIntegrationTest의 포인트 사용 이력·잔액 부족·Point 미생성 거절|savesReservationWithoutPointUse·allowsInsufficientPointBalance·allowsZeroPointBalance·allowsUninitializedPoint. POINT 변화 0·Point 없는 PG 성공|
+|동일 주문의 확정 재요청 거절|returnsSamePgAttemptWithoutMoreEffects·confirmsOnlyOnce: 같은 PG 키는 저장 결과, 발송/확보는 1회. 과거 POINT 재결제 거절은 OrderV1ApiE2ETest.rejectsAlreadyConfirmed로 유지|
+|OrderTransactionIntegrationTest의 단일 POINT TX rollback|rollsBackEverythingWhenLastOrderSaveFailsAfterFlush·respondsInternalServerErrorOnTechnicalFailure·failureReleaseSqlRollbackDoesNotUndoCommittedReservation: TX A/B SQL 뒤 실패를 분리하고 기존 외부 거래 복구까지 확인|
+|OrderConcurrencyIntegrationTest의 잔액 소비 경쟁·충전/사용 직렬화|confirmsOnlyWhatBalanceAllows는 모든 PG 결제 허용·잔액 유지로 전환, keepsBothChargeAndPayment는 충전과 PG 성공을 함께 보존. 독립 포인트 기능 검사는 유지|
+|OrderV1ApiE2ETest·CustomerPurchaseFlowE2ETest의 입력 없는 신규 POINT 결제|UUID/합성 카드 입력·PG payment 응답·200/202, 충전 잔액 유지로 전환. 비소유·없는 주문·재고 부족/삭제·과거 POINT 확정 오류는 유지|
+
+I4의 기본 API 연결 완료이며 4.5 전체 검증 완료는 아니다. I5의 callback-first/조회 시작·반영 역전 장벽, 실제 풀 점유와 미발송의 업무 연결, 같은 PG·DB를 유지한 commerce 컨텍스트 재시작, 전체 V 항목의 남은 조건과 글 실험은 별도로 검증해야 한다. 일반 회귀 통과를 이 조건들의 대체 근거로 사용하지 않는다.

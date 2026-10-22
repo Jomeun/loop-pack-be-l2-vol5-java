@@ -17,9 +17,9 @@ public record OrderInfo(
     Long id,
     Long userId,
     String status,
-    Long orderTotal,
-    Long usedPointAmount,
-    Long paymentAmount,
+    Long totalAmount,
+    Long pointAmount,
+    Long paidAmount,
     List<Item> items,
     PaymentInfo payment
 ) {
@@ -62,14 +62,14 @@ public record OrderInfo(
     }
 
     public static OrderInfo from(OrderModel order, PaymentModel attempt) {
-        Money paymentAmount = order.getPaidAmount();
+        Money paidAmount = order.getPaidAmount();
         return new OrderInfo(
             order.getId(),
             order.getUserId(),
             order.getStatus().name(),
             order.getTotalAmount().toWon(),
             order.getPointAmount(),
-            paymentAmount != null ? paymentAmount.toWon() : null,
+            paidAmount != null ? paidAmount.toWon() : null,
             order.getItems().stream().map(Item::from).toList(),
             PaymentInfo.of(order, attempt)
         );

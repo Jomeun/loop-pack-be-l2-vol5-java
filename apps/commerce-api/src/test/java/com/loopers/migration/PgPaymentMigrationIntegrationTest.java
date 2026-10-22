@@ -250,8 +250,8 @@ class PgPaymentMigrationIntegrationTest {
         try (ConfigurableApplicationContext context = boot(LEGACY, "validate")) {
             OrderFacade orderFacade = context.getBean(OrderFacade.class);
             TransactionTemplate tx = context.getBean(TransactionTemplate.class);
-            OrderInfo pastPoint = tx.execute(status -> OrderInfo.from(orderFacade.getOrder(1L, 1L)));
-            OrderInfo draft = tx.execute(status -> OrderInfo.from(orderFacade.getOrder(1L, 3L)));
+            OrderInfo pastPoint = tx.execute(status -> orderFacade.getOrder(1L, 1L));
+            OrderInfo draft = tx.execute(status -> orderFacade.getOrder(1L, 3L));
 
             BeginConfirmationResult begun = context.getBean(PaymentTransactionService.class)
                 .beginConfirmation(1L, 3L, new PaymentConfirmCommand(KEY, "TEST", "0000-0000-0000-0000"));
