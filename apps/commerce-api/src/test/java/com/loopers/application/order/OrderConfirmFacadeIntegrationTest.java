@@ -236,6 +236,8 @@ class OrderConfirmFacadeIntegrationTest extends PgTestSupport {
                 .extracting("errorType")
                 .isEqualTo(ErrorType.INSUFFICIENT_STOCK);
 
+            assertThat(pg.state().counts().createReceived()).isZero();
+            assertThat(pg.state().transactions()).isEmpty();
             assertAll(
                 () -> assertThat(stateOf(order.id(), user, shirt, pants)).isEqualTo(before),
                 () -> assertThat(orderJpaRepository.findById(order.id()).orElseThrow().getStatus())
@@ -244,7 +246,8 @@ class OrderConfirmFacadeIntegrationTest extends PgTestSupport {
                 () -> assertThat(stockOf(shirt)).isEqualTo(5L),
                 () -> assertThat(stockOf(pants)).isEqualTo(1L),
                 () -> assertThat(stockHistoryJpaRepository.findAll()).noneMatch(
-                    history -> history.getCause() == StockChangeCause.ORDER_DEDUCTION)
+                    history -> history.getCause() == StockChangeCause.ORDER_RESERVATION
+                        || history.getCause() == StockChangeCause.ORDER_RELEASE)
             );
         }
 
@@ -266,6 +269,8 @@ class OrderConfirmFacadeIntegrationTest extends PgTestSupport {
                 .extracting("errorType")
                 .isEqualTo(ErrorType.INSUFFICIENT_STOCK);
 
+            assertThat(pg.state().counts().createReceived()).isZero();
+            assertThat(pg.state().transactions()).isEmpty();
             assertAll(
                 () -> assertThat(stateOf(order.id(), user, shirt)).isEqualTo(before),
                 () -> assertThat(orderJpaRepository.findById(order.id()).orElseThrow().getStatus())
@@ -273,7 +278,8 @@ class OrderConfirmFacadeIntegrationTest extends PgTestSupport {
                 () -> assertThat(balanceOf(user)).isEqualTo(10_000L),
                 () -> assertThat(stockOf(shirt)).isEqualTo(1L),
                 () -> assertThat(stockHistoryJpaRepository.findAll()).noneMatch(
-                    history -> history.getCause() == StockChangeCause.ORDER_DEDUCTION),
+                    history -> history.getCause() == StockChangeCause.ORDER_RESERVATION
+                        || history.getCause() == StockChangeCause.ORDER_RELEASE),
                 () -> assertThat(pointHistoryJpaRepository.findAll()).noneMatch(
                     history -> history.getCause() == PointChangeCause.ORDER_USE),
                 () -> assertThat(stockHistoryJpaRepository.findAll().stream()

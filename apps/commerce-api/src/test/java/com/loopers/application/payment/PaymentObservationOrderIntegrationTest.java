@@ -2,7 +2,6 @@ package com.loopers.application.payment;
 
 import com.loopers.domain.payment.ObservationSource;
 import com.loopers.domain.payment.PaymentCheckToken;
-import com.loopers.domain.payment.PaymentConflictCode;
 import com.loopers.domain.payment.PaymentModel;
 import com.loopers.domain.payment.PaymentObservation;
 import com.loopers.domain.payment.PgTransactionStatus;
@@ -105,9 +104,9 @@ class PaymentObservationOrderIntegrationTest {
         PaymentApplyResult result = apply(createToken, tx(ObservationSource.CREATE, KB, 2_000L, PgTransactionStatus.PENDING));
 
         assertAll(
-            () -> assertThat(result.conflictCode()).isEqualTo(PaymentConflictCode.IDENTITY_MISMATCH),
-            () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row ->
-                assertThat(row).containsEntry("observed_transaction_key", KB)),
+            () -> assertThat(result.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
+            () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row -> assertThat(row)
+                .containsEntry("code", "IDENTITY_MISMATCH").containsEntry("observed_transaction_key", KB)),
             () -> assertThat(fixture.payment(orderId)).containsEntry("status", "SUCCESS").containsEntry("transaction_key", KA)
                 .containsEntry("verification_status", "CONFLICT"),
             () -> assertThat(fixture.order(orderId)).containsEntry("status", "CONFIRMED"),
@@ -149,7 +148,9 @@ class PaymentObservationOrderIntegrationTest {
             () -> assertThat(preparedAfter.terminalAtStart()).isTrue(),
             () -> assertThat(ignored.outcome()).isEqualTo(PaymentApplyResult.Outcome.FINAL),
             () -> assertThat(paymentAfterIgnored).isEqualTo(paymentAfterTerminal),
-            () -> assertThat(regression.conflictCode()).isEqualTo(PaymentConflictCode.TERMINAL_REGRESSION),
+            () -> assertThat(regression.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
+            () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row ->
+                assertThat(row).containsEntry("code", "TERMINAL_REGRESSION")),
             () -> assertThat(fixture.payment(orderId)).containsEntry("status", "SUCCESS").containsEntry("verification_status", "CONFLICT"),
             () -> assertThat(fixture.stock(product.getId())).isEqualTo(8L)
         );
@@ -206,7 +207,9 @@ class PaymentObservationOrderIntegrationTest {
         PaymentApplyResult same = apply(query(), tx(ObservationSource.QUERY, KA, 2_000L, PgTransactionStatus.SUCCESS));
 
         assertAll(
-            () -> assertThat(opposite.conflictCode()).isEqualTo(PaymentConflictCode.TERMINAL_MISMATCH),
+            () -> assertThat(opposite.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
+            () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row ->
+                assertThat(row).containsEntry("code", "TERMINAL_MISMATCH")),
             () -> assertThat(same.outcome()).isEqualTo(PaymentApplyResult.Outcome.FINAL),
             () -> assertThat(fixture.order(orderId)).containsEntry("status", "CONFIRMED"),
             () -> assertThat(fixture.histories(orderId, "ORDER_RELEASE")).isZero(),
@@ -224,9 +227,9 @@ class PaymentObservationOrderIntegrationTest {
         PaymentApplyResult result = apply(query(), tx(ObservationSource.QUERY, KB, 2_000L, status));
 
         assertAll(
-            () -> assertThat(result.conflictCode()).isEqualTo(PaymentConflictCode.IDENTITY_MISMATCH),
-            () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row ->
-                assertThat(row).containsEntry("observed_transaction_key", KB)),
+            () -> assertThat(result.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
+            () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row -> assertThat(row)
+                .containsEntry("code", "IDENTITY_MISMATCH").containsEntry("observed_transaction_key", KB)),
             () -> assertThat(fixture.payment(orderId)).containsEntry("status", "PENDING").containsEntry("transaction_key", KA)
                 .containsEntry("verification_status", "CONFLICT"),
             () -> assertThat(fixture.order(orderId)).containsEntry("status", "PAYMENT_PENDING"),
@@ -243,9 +246,10 @@ class PaymentObservationOrderIntegrationTest {
         PaymentApplyResult result = apply(query(), tx(ObservationSource.QUERY, KB, 1L, PgTransactionStatus.PENDING));
 
         assertAll(
-            () -> assertThat(result.conflictCode()).isEqualTo(PaymentConflictCode.IDENTITY_MISMATCH),
+            () -> assertThat(result.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
             () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row -> assertThat(row)
-                .containsEntry("observed_transaction_key", KB).containsEntry("observed_amount", 1L)),
+                .containsEntry("code", "IDENTITY_MISMATCH").containsEntry("observed_transaction_key", KB)
+                .containsEntry("observed_amount", 1L)),
             () -> assertThat(fixture.payment(orderId)).containsEntry("transaction_key", KA)
         );
     }
@@ -259,9 +263,9 @@ class PaymentObservationOrderIntegrationTest {
         PaymentApplyResult result = apply(query(), tx(ObservationSource.QUERY, KA, 2_001L, PgTransactionStatus.PENDING));
 
         assertAll(
-            () -> assertThat(result.conflictCode()).isEqualTo(PaymentConflictCode.AMOUNT_MISMATCH),
+            () -> assertThat(result.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
             () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row ->
-                assertThat(row).containsEntry("observed_amount", 2_001L)),
+                assertThat(row).containsEntry("code", "AMOUNT_MISMATCH").containsEntry("observed_amount", 2_001L)),
             () -> assertThat(fixture.payment(orderId)).containsEntry("status", "PENDING").containsEntry("transaction_key", KA)
         );
     }
@@ -277,7 +281,9 @@ class PaymentObservationOrderIntegrationTest {
 
         assertAll(
             () -> assertThat(after.terminalAtStart()).isTrue(),
-            () -> assertThat(result.conflictCode()).isEqualTo(PaymentConflictCode.IDENTITY_MISMATCH),
+            () -> assertThat(result.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
+            () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row -> assertThat(row)
+                .containsEntry("code", "IDENTITY_MISMATCH").containsEntry("observed_transaction_key", KB)),
             () -> assertThat(fixture.payment(orderId)).containsEntry("status", "SUCCESS").containsEntry("transaction_key", KA),
             () -> assertThat(fixture.order(orderId)).containsEntry("status", "CONFIRMED"),
             () -> assertThat(fixture.histories(orderId, "ORDER_RELEASE")).isZero(),

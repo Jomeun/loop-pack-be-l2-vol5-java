@@ -168,7 +168,7 @@ class PgPaymentResilienceIntegrationTest extends PaymentHttpTestSupport {
             assertThat(payment(order)).containsEntry("status", "FAILED").containsEntry("failure_kind", "POOL_ACQUIRE_TIMEOUT")
                 .containsEntry("transaction_key", null).containsEntry("verification_status", "NOT_CHECKED")
                 .containsEntry("verification_checked_at", null);
-            var token = new PaymentCheckToken(((Number) payment(order).get("id")).longValue(), order, ObservationSource.CREATE, false, null);
+            var token = new PaymentCheckToken(((Number) payment(order).get("id")).longValue(), order, ObservationSource.CREATE, false);
             transactions.applyObservation(token, new PaymentObservation.LocalNotDispatched(LocalNotDispatchedReason.POOL_ACQUIRE_TIMEOUT));
             assertThat(confirm(order).getStatusCode().value()).isEqualTo(200);
             assertThat(stock(product.getId())).isEqualTo(5);

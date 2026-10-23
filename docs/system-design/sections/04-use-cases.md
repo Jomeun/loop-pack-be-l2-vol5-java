@@ -325,7 +325,7 @@ SQL·잠금 절·실행계획은 infrastructure 책임이다. IN + ORDER BY만�
 
 - PrepareConfirmationResult: READY 또는 STORED. READY는 결제 없는 DRAFT이며 발송 권한·재고 확보를 의미하지 않는다. STORED는 복사한 OrderInfo다.
 - BeginConfirmationResult: SEND 또는 STORED. SEND는 이번 실행의 발송 권한·불변 PaymentRequest·확인 토큰, STORED는 복사한 OrderInfo를 갖는다.
-- PaymentCheckToken: paymentId·orderId·source(CREATE/QUERY)·terminalAtStart·조회 식별자. 순번은 없다. terminalAtStart는 확인 준비 때 이미 종결했는지이며 늦은 PENDING 처리 구분에 사용한다.
+- PaymentCheckToken: paymentId·orderId·source(CREATE/QUERY)·terminalAtStart. 순번은 없다. 조회 종류·식별자(거래 키 또는 외부 주문 ID)는 토큰에 넣지 않고 확인 준비 결과인 VerificationTarget(token·kind·target)에만 둔다. terminalAtStart는 확인 준비 때 이미 종결했는지이며 늦은 PENDING 처리 구분에 사용한다.
 - PaymentApplyResult: OrderInfo와 FINAL/PENDING/UNAVAILABLE/CONFLICT. 저장 업무 상태와 이번 확인 결과를 구분하며 콜백은 data 없는 HTTP ACK로 변환한다.
 - PaymentObservation: 파싱한 관찰·충돌 근거를 전달하며 원문 HTTP 예외·카드를 저장 모델로 넘기지 않는다. 제공자·계정·대상 URL은 서버 설정으로 고정한다.
 

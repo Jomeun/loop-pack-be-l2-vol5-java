@@ -58,7 +58,6 @@ public class OrderConfirmFacade {
 
     private static PaymentApplyResult stored(OrderInfo order) {
         boolean terminal = "CONFIRMED".equals(order.status()) || "PAYMENT_FAILED".equals(order.status());
-        return new PaymentApplyResult(order,
-            terminal ? PaymentApplyResult.Outcome.FINAL : PaymentApplyResult.Outcome.PENDING, null);
+        return new PaymentApplyResult(order, terminal ? PaymentApplyResult.Outcome.FINAL : PaymentApplyResult.Outcome.PENDING);
     }
 }

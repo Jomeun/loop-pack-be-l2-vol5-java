@@ -141,7 +141,7 @@ public class PaymentTransactionService {
 
         PaymentRequest request = new PaymentRequest(payment.getProviderOrderId(), payment.getAmount().toWon(),
             command.cardType(), command.cardNo());
-        PaymentCheckToken token = new PaymentCheckToken(payment.getId(), orderId, ObservationSource.CREATE, false, null);
+        PaymentCheckToken token = new PaymentCheckToken(payment.getId(), orderId, ObservationSource.CREATE, false);
         return BeginConfirmationResult.send(request, token);
     }
 
@@ -160,17 +160,14 @@ public class PaymentTransactionService {
             .orElseThrow(() -> new CoreException(ErrorType.ORDER_NOT_FOUND));
         requireConsistent(order, payment);
         PaymentCheckToken token = new PaymentCheckToken(payment.getId(), orderId, ObservationSource.QUERY,
-            payment.getStatus().isTerminal(), null);
+            payment.getStatus().isTerminal());
         if (callbackTransactionKey != null) {
-            return new VerificationTarget(withTarget(token, callbackTransactionKey),
-                VerificationTarget.LookupKind.TRANSACTION_KEY, callbackTransactionKey);
+            return new VerificationTarget(token, VerificationTarget.LookupKind.TRANSACTION_KEY, callbackTransactionKey);
         }
         if (payment.getTransactionKey() != null) {
-            return new VerificationTarget(withTarget(token, payment.getTransactionKey()),
-                VerificationTarget.LookupKind.TRANSACTION_KEY, payment.getTransactionKey());
+            return new VerificationTarget(token, VerificationTarget.LookupKind.TRANSACTION_KEY, payment.getTransactionKey());
         }
-        return new VerificationTarget(withTarget(token, payment.getProviderOrderId()),
-            VerificationTarget.LookupKind.PROVIDER_ORDER_ID, payment.getProviderOrderId());
+        return new VerificationTarget(token, VerificationTarget.LookupKind.PROVIDER_ORDER_ID, payment.getProviderOrderId());
     }
 
     /**
@@ -206,7 +203,7 @@ public class PaymentTransactionService {
         orderRepository.save(order);
         paymentRepository.save(payment);
         reachBeforeCommit("applyObservation", order.getId());
-        return new PaymentApplyResult(OrderInfo.from(order, payment), outcome, decision.conflictCode());
+        return new PaymentApplyResult(OrderInfo.from(order, payment), outcome);
     }
 
     /**
@@ -223,8 +220,7 @@ public class PaymentTransactionService {
         recordConflictSummary(payment, decision);
         paymentRepository.save(payment);
         reachBeforeCommit("recordConstraintConflict", order.getId());
-        return new PaymentApplyResult(OrderInfo.from(order, payment), PaymentApplyResult.Outcome.CONFLICT,
-            decision.conflictCode());
+        return new PaymentApplyResult(OrderInfo.from(order, payment), PaymentApplyResult.Outcome.CONFLICT);
     }
 
     private OrderModel lockOwnedOrder(Long orderId, Long userId) {
@@ -274,10 +270,12 @@ public class PaymentTransactionService {
             && providerAccount.equals(payment.getProviderAccount())
             && PaymentModel.providerOrderIdOf(order.getId()).equals(payment.getProviderOrderId())
             && payment.getAmount().equals(order.getTotalAmount())
-            && order.getPaymentMethod() == PaymentMethod.PG;
+            && order.getPaymentMethod() == PaymentMethod.PG
+            && Long.valueOf(0L).equals(order.getPointAmount());
         boolean statusMatches = switch (order.getStatus()) {
-            case PAYMENT_PENDING -> payment.getStatus() == PaymentStatus.UNKNOWN || payment.getStatus() == PaymentStatus.PENDING;
-            case CONFIRMED -> payment.getStatus() == PaymentStatus.SUCCESS && order.getPaidAmount() != null;
+            case PAYMENT_PENDING -> (payment.getStatus() == PaymentStatus.UNKNOWN || payment.getStatus() == PaymentStatus.PENDING)
+                && order.getPaidAmount() == null;
+            case CONFIRMED -> payment.getStatus() == PaymentStatus.SUCCESS && payment.getAmount().equals(order.getPaidAmount());
             case PAYMENT_FAILED -> payment.getStatus() == PaymentStatus.FAILED && order.getPaidAmount() == null;
             case DRAFT -> false;
         };
@@ -364,9 +362,5 @@ public class PaymentTransactionService {
      */
     private void reachBeforeCommit(String operation, Long orderId) {
         probe.reach(PaymentTransactionProbe.Point.BEFORE_COMMIT, operation, orderId);
-    }
-
-    private static PaymentCheckToken withTarget(PaymentCheckToken token, String target) {
-        return new PaymentCheckToken(token.paymentId(), token.orderId(), token.source(), token.terminalAtStart(), target);
     }
 }

@@ -221,7 +221,7 @@ class OrderV1ApiE2ETest extends PgTestSupport {
 
         @DisplayName("포인트가 부족해도 PG 결제는 성공하고 잔액은 유지한다.")
         @Test
-        void rejectsInsufficientPoint() {
+        void allowsInsufficientPointBalance() {
             UserModel user = userFixture.createUserWithPoint();
             pointFacade.charge(user.getId(), 1_000L);
             ProductModel shirt = productFixture.createProduct("티셔츠", 2_000L, 5L);
@@ -258,6 +258,8 @@ class OrderV1ApiE2ETest extends PgTestSupport {
                 ENDPOINT + "/" + order.id() + "/confirm", HttpMethod.POST,
                 request(PgCommands.forOrder(order.id()), user.getId()), ORDER_TYPE);
 
+            assertThat(pg.state().counts().createReceived()).isZero();
+            assertThat(pg.state().transactions()).isEmpty();
             assertAll(
                 () -> assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT),
                 () -> assertThat(response.getBody().meta().errorCode()).isEqualTo("INSUFFICIENT_STOCK"),

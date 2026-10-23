@@ -2,7 +2,6 @@ package com.loopers.application.payment;
 
 import com.loopers.domain.payment.ObservationSource;
 import com.loopers.domain.payment.PaymentCheckToken;
-import com.loopers.domain.payment.PaymentConflictCode;
 import com.loopers.domain.payment.PaymentModel;
 import com.loopers.domain.payment.PaymentObservation;
 import com.loopers.domain.payment.PgTransactionStatus;
@@ -243,6 +242,15 @@ class PaymentParentLockIntegrationTest {
                 awaitLatch(t1Release);
             }
         });
+        CountDownLatch t2AtCommit = new CountDownLatch(1);
+        CountDownLatch t2Release = release();
+        AtomicBoolean firstCommit = new AtomicBoolean(true);
+        probe.on(PaymentTransactionProbe.Point.BEFORE_COMMIT, "applyObservation", orderId, () -> {
+            if (!firstCommit.getAndSet(false)) {
+                t2AtCommit.countDown();
+                awaitLatch(t2Release);
+            }
+        });
 
         Future<PaymentApplyResult> a = workers.submit(() -> service.applyObservation(t1,
             tx(ObservationSource.QUERY, orderId, "tx-KB", 1L, PgTransactionStatus.PENDING)));
@@ -251,11 +259,18 @@ class PaymentParentLockIntegrationTest {
             tx(ObservationSource.QUERY, orderId, "tx-other", 7L, PgTransactionStatus.SUCCESS)));
         await().atMost(WAIT).until(fixture::someoneWaitsForOrderLock);
         t1Release.countDown();
-
         PaymentApplyResult first = get(a);
+        try {
+            awaitLatch(t2AtCommit);
+            assertThat(fixture.conflicts(orderId)).as("뒤 TX commit 직전에 보이는 앞 TX 의 commit 요약").singleElement()
+                .satisfies(row -> assertThat(row).containsEntry("code", "AMOUNT_MISMATCH").containsEntry("observed_transaction_key", "tx-KB"));
+        } finally {
+            t2Release.countDown();
+        }
+
         PaymentApplyResult second = get(b);
         assertAll(
-            () -> assertThat(first.conflictCode()).isEqualTo(PaymentConflictCode.AMOUNT_MISMATCH),
+            () -> assertThat(first.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
             () -> assertThat(second.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
             () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row -> assertThat(row)
                 .as("마지막 commit 내용").containsEntry("observed_transaction_key", "tx-other").containsEntry("observed_amount", 7L))
@@ -331,7 +346,9 @@ class PaymentParentLockIntegrationTest {
         PaymentApplyResult second = get(b);
         assertAll(
             () -> assertThat(get(a).outcome()).isEqualTo(PaymentApplyResult.Outcome.FINAL),
-            () -> assertThat(second.conflictCode()).isEqualTo(PaymentConflictCode.TERMINAL_MISMATCH),
+            () -> assertThat(second.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
+            () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row ->
+                assertThat(row).containsEntry("code", "TERMINAL_MISMATCH")),
             () -> assertThat(fixture.order(orderId)).containsEntry("status", "CONFIRMED"),
             () -> assertThat(fixture.histories(orderId, "ORDER_RELEASE")).isZero(),
             () -> assertThat(fixture.stock(product.getId())).isEqualTo(8L)
@@ -354,7 +371,9 @@ class PaymentParentLockIntegrationTest {
 
         assertAll(
             () -> assertThat(callback.token().terminalAtStart()).isTrue(),
-            () -> assertThat(result.conflictCode()).isEqualTo(PaymentConflictCode.TERMINAL_REGRESSION),
+            () -> assertThat(result.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
+            () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row ->
+                assertThat(row).containsEntry("code", "TERMINAL_REGRESSION")),
             () -> assertThat(fixture.order(orderId)).containsEntry("status", "CONFIRMED"),
             () -> assertThat(fixture.payment(orderId)).containsEntry("status", "SUCCESS")
         );

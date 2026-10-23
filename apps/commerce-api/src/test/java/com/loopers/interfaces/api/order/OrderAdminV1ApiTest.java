@@ -3,6 +3,7 @@ package com.loopers.interfaces.api.order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import com.loopers.domain.payment.PaymentRepository;
+import com.loopers.application.payment.PaymentReconcileFacade;
 import com.loopers.fixture.PgCommands;
 import com.loopers.fixture.PgTestSupport;
 import com.loopers.fixture.PastPointOrderFixture;
@@ -15,11 +16,16 @@ import com.loopers.domain.product.ProductModel;
 import com.loopers.domain.user.UserModel;
 import com.loopers.fixture.ProductFixture;
 import com.loopers.fixture.UserFixture;
+import com.loopers.fixture.pg.PaymentStatus;
+import com.loopers.fixture.pg.PgOperation;
+import com.loopers.fixture.pg.ResponsePlan;
 import com.loopers.utils.DatabaseCleanUp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -59,6 +65,8 @@ class OrderAdminV1ApiTest extends PgTestSupport {
     private OrderFacade orderFacade;
     @Autowired
     private OrderConfirmFacade orderConfirmFacade;
+    @Autowired
+    private PaymentReconcileFacade reconcile;
     @Autowired
     private PointFacade pointFacade;
     @Autowired
@@ -189,6 +197,50 @@ class OrderAdminV1ApiTest extends PgTestSupport {
             .andExpect(jsonPath("$.data.payment.transactionKey").doesNotExist())
             .andExpect(jsonPath("$.data.payment.providerOrderId").doesNotExist());
         assertThat(pg.state().counts().lookupByKeyReceived()).isEqualTo(getsBefore);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"UNKNOWN", "PENDING", "SUCCESS", "FAILED"})
+    void detailAndPageExposeStoredPgStatesWithoutQueryingPg(String paymentStatus) throws Exception {
+        var user = userFixture.createUserWithoutPoint();
+        var product = productFixture.createProduct("PG 상품", 2000L, 5L);
+        var order = orderFacade.create(user.getId(), List.of(new OrderItemCommand(product.getId(), 1L)));
+        if (paymentStatus.equals("UNKNOWN")) {
+            pg.enqueuePlan(PgOperation.CREATE, com.loopers.domain.payment.PaymentModel.providerOrderIdOf(order.id()),
+                ResponsePlan.closeEarly());
+        }
+        orderConfirmFacade.confirm(user.getId(), order.id(), PgCommands.forOrder(order.id()));
+        if (paymentStatus.equals("SUCCESS") || paymentStatus.equals("FAILED")) {
+            String key = jdbc.queryForObject("SELECT transaction_key FROM payment WHERE order_id = ?", String.class, order.id());
+            pg.setStatus(key, PaymentStatus.valueOf(paymentStatus));
+            reconcile.reconcile(user.getId(), order.id());
+        }
+        awaitPgIdle();
+        var counts = pg.state().counts();
+        var saved = jdbc.queryForMap("SELECT * FROM payment WHERE order_id = ?", order.id());
+        String orderStatus = paymentStatus.equals("SUCCESS") ? "CONFIRMED"
+            : paymentStatus.equals("FAILED") ? "PAYMENT_FAILED" : "PAYMENT_PENDING";
+
+        for (String path : List.of(ENDPOINT + "/" + order.id(), ENDPOINT)) {
+            String prefix = path.equals(ENDPOINT) ? "$.data.items[0]" : "$.data";
+            var response = mockMvc.perform(get(path))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(prefix + ".status").value(orderStatus))
+                .andExpect(jsonPath(prefix + ".pointAmount").value(0))
+                .andExpect(jsonPath(prefix + ".payment.method").value("PG"))
+                .andExpect(jsonPath(prefix + ".payment.status").value(paymentStatus))
+                .andExpect(jsonPath(prefix + ".payment.amount").value(2000))
+                .andExpect(jsonPath(prefix + ".payment.verificationStatus").value(saved.get("verification_status")))
+                .andExpect(jsonPath(prefix + ".payment.orderUrl").value(ENDPOINT + "/" + order.id()))
+                .andExpect(jsonPath(prefix + ".payment.reconcileUrl").value("/api/v1/orders/" + order.id() + "/payment/reconcile"));
+            if (paymentStatus.equals("SUCCESS")) {
+                response.andExpect(jsonPath(prefix + ".paidAmount").value(2000));
+            } else {
+                response.andExpect(jsonPath(prefix + ".paidAmount").doesNotExist());
+            }
+        }
+        assertThat(pg.state().counts()).isEqualTo(counts);
+        assertThat(jdbc.queryForMap("SELECT * FROM payment WHERE order_id = ?", order.id())).isEqualTo(saved);
     }
 
     @Test

@@ -10,13 +10,10 @@ import com.loopers.domain.payment.PgTransactionStatus;
 import com.loopers.fixture.pg.FixtureState;
 import com.loopers.fixture.pg.GateStatus;
 import com.loopers.fixture.pg.PaymentStatus;
-import com.loopers.fixture.pg.PgFixtureServer;
 import com.loopers.fixture.pg.PgOperation;
 import com.loopers.fixture.pg.ResponsePlan;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -26,12 +23,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
@@ -47,34 +41,11 @@ import static org.junit.jupiter.api.Assertions.assertAll;
  * 시작하고, 실제 PgHttpGateway 가 테스트 PG fixture 로 GET 을 보낸다. TX B 반영·409 응답은 범위가 아니다.
  */
 @DisplayName("pgLookup 회로는 승인한 분류대로 조회 표본을 기록하고 회로 밖에서만 확인 불가로 바꾼다.")
-class PgLookupCircuitTest {
+class PgLookupCircuitTest extends PgAdapterTestSupport {
 
-    private static final Duration OBSERVE_DEADLINE = Duration.ofSeconds(5);
-    private static final Duration FAST_POLL = Duration.ofMillis(5);
-    private static final Duration TASK_DEADLINE = Duration.ofSeconds(15);
     private static final ObservationSource QUERY = ObservationSource.QUERY;
     private static final PaymentObservation UNAVAILABLE = new PaymentObservation.Unavailable(QUERY);
     private static final String ORDER = "LP-ORD-0000000600";
-
-    private PgFixtureServer pg;
-    private ExecutorService callers;
-
-    @BeforeEach
-    void setUp() {
-        pg = PgFixtureServer.start();
-        callers = Executors.newFixedThreadPool(10);
-    }
-
-    @AfterEach
-    void tearDown() throws InterruptedException {
-        try {
-            callers.shutdownNow();
-            assertThat(callers.awaitTermination(TASK_DEADLINE.toSeconds(), TimeUnit.SECONDS)).as("호출 스레드 종료").isTrue();
-        } finally {
-            pg.close();
-            assertThat(pg.isTerminated()).as("PG fixture 종료").isTrue();
-        }
-    }
 
     @DisplayName("통신 성공으로 기록할 때,")
     @Nested
@@ -406,14 +377,6 @@ class PgLookupCircuitTest {
             .map(transaction -> transaction.transactionKey())
             .toList();
         return keys.get(keys.size() - 1);
-    }
-
-    private void awaitHandlersFinished() {
-        await().atMost(OBSERVE_DEADLINE).until(() -> {
-            FixtureState state = pg.state();
-            return state.activeRequests() == 0
-                && state.journal().stream().allMatch(entry -> entry.completedAt() != null);
-        });
     }
 
     private static String tx(String key, String orderId) {

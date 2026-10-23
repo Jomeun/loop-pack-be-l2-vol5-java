@@ -104,7 +104,7 @@ class OrderConfirmFacadeTest {
     @Test
     void gatewayProgrammingErrorDoesNotBecomeUnavailableOrInvokeTxB() {
         PaymentRequest request = new PaymentRequest("LP-ORD-0000000001", 1000, "TEST", "0000-0000-0000-0000");
-        PaymentCheckToken token = new PaymentCheckToken(3L, 1L, ObservationSource.CREATE, false, null);
+        PaymentCheckToken token = new PaymentCheckToken(3L, 1L, ObservationSource.CREATE, false);
         when(tx.prepareConfirmation(2L, 1L, command)).thenReturn(ready);
         when(gateway.checkCreateAdmission()).thenReturn(CreateAdmission.READY);
         when(tx.beginConfirmation(2L, 1L, command)).thenReturn(
@@ -118,9 +118,9 @@ class OrderConfirmFacadeTest {
     @Test
     void callOrderIsPrepareAdmissionBeginCreateThenApplyWithoutAdditionalLookup() {
         PaymentRequest request = new PaymentRequest("LP-ORD-0000000001", 1000, "TEST", "0000-0000-0000-0000");
-        PaymentCheckToken token = new PaymentCheckToken(3L, 1L, ObservationSource.CREATE, false, null);
+        PaymentCheckToken token = new PaymentCheckToken(3L, 1L, ObservationSource.CREATE, false);
         PaymentObservation observation = new PaymentObservation.Unavailable(ObservationSource.CREATE);
-        PaymentApplyResult expected = new PaymentApplyResult(pending, PaymentApplyResult.Outcome.UNAVAILABLE, null);
+        PaymentApplyResult expected = new PaymentApplyResult(pending, PaymentApplyResult.Outcome.UNAVAILABLE);
         when(tx.prepareConfirmation(2L, 1L, command)).thenReturn(ready);
         when(gateway.checkCreateAdmission()).thenReturn(CreateAdmission.READY);
         when(tx.beginConfirmation(2L, 1L, command)).thenReturn(

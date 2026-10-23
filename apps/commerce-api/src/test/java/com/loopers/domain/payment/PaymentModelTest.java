@@ -36,11 +36,11 @@ class PaymentModelTest {
     }
 
     private static PaymentCheckToken create() {
-        return new PaymentCheckToken(0L, ORDER_ID, ObservationSource.CREATE, false, null);
+        return new PaymentCheckToken(0L, ORDER_ID, ObservationSource.CREATE, false);
     }
 
     private static PaymentCheckToken query(boolean terminalAtStart) {
-        return new PaymentCheckToken(0L, ORDER_ID, ObservationSource.QUERY, terminalAtStart, KA);
+        return new PaymentCheckToken(0L, ORDER_ID, ObservationSource.QUERY, terminalAtStart);
     }
 
     private static PaymentObservation.TransactionObserved tx(ObservationSource source, String key, String order, long amount,
@@ -465,10 +465,10 @@ class PaymentModelTest {
 
         assertAll(
             () -> assertThatThrownBy(() -> payment.recordObservation(
-                new PaymentCheckToken(1L, ORDER_ID, ObservationSource.CREATE, false, null), created, T1))
+                new PaymentCheckToken(1L, ORDER_ID, ObservationSource.CREATE, false), created, T1))
                 .isInstanceOf(CoreException.class).extracting("errorType").isEqualTo(ErrorType.INTERNAL_ERROR),
             () -> assertThatThrownBy(() -> payment.recordObservation(
-                new PaymentCheckToken(0L, 43L, ObservationSource.CREATE, false, null), created, T1))
+                new PaymentCheckToken(0L, 43L, ObservationSource.CREATE, false), created, T1))
                 .extracting("errorType").isEqualTo(ErrorType.INTERNAL_ERROR),
             () -> assertThatThrownBy(() -> payment.recordObservation(query(false), created, T1))
                 .as("출처 불일치").extracting("errorType").isEqualTo(ErrorType.INTERNAL_ERROR),

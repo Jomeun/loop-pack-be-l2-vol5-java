@@ -4,13 +4,20 @@ import com.loopers.application.payment.ControllableProbe;
 import com.loopers.application.payment.PaymentTransactionProbe;
 import com.loopers.application.payment.PaymentTxTestConfig;
 import com.loopers.application.payment.PaymentReconcileFacade;
+import com.loopers.application.payment.PaymentObservationApplier;
+import com.loopers.application.payment.PaymentTransactionService;
 import com.loopers.domain.order.OrderItemCommand;
+import com.loopers.domain.payment.PaymentGateway;
+import com.loopers.domain.payment.PaymentObservation;
 import com.loopers.domain.product.ProductModel;
 import com.loopers.fixture.PgCommands;
 import com.loopers.fixture.PgTestSupport;
 import com.loopers.fixture.ProductFixture;
 import com.loopers.fixture.UserFixture;
 import com.loopers.fixture.pg.PaymentStatus;
+import com.loopers.fixture.pg.CreateOutcome;
+import com.loopers.fixture.pg.PgOperation;
+import com.loopers.fixture.pg.ResponsePlan;
 import com.loopers.utils.DatabaseCleanUp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +52,9 @@ class OrderTransactionIntegrationTest extends PgTestSupport {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private MockMvc mvc;
     @Autowired private DatabaseCleanUp cleanup;
+    @Autowired private PaymentTransactionService transactions;
+    @Autowired private PaymentGateway gateway;
+    @Autowired private PaymentObservationApplier applier;
     private Long user;
     private Long order;
     private ProductModel product;
@@ -106,10 +116,50 @@ class OrderTransactionIntegrationTest extends PgTestSupport {
         assertThat(stock()).isEqualTo(3L);
         assertThat(pg.state().transactions()).singleElement().satisfies(transaction ->
             assertThat(transaction.status()).isEqualTo(PaymentStatus.SUCCESS));
+        String transactionKey = pg.state().transactions().getFirst().transactionKey();
         probe.clear();
         assertThat(reconcile.reconcile(user, order).order().status()).isEqualTo("CONFIRMED");
+        assertRecoveredSuccess(transactionKey);
+        assertThat(reconcile.reconcile(user, order).order().status()).isEqualTo("CONFIRMED");
+        assertRecoveredSuccess(transactionKey);
         assertThat(pg.state().counts().createReceived()).isEqualTo(1);
         assertThat(pg.state().counts().lookupByOrderReceived()).isEqualTo(1);
+        assertThat(pg.state().counts().lookupByKeyReceived()).isEqualTo(1);
+    }
+
+    private void assertRecoveredSuccess(String transactionKey) {
+        assertThat(stock()).isEqualTo(3);
+        assertThat(jdbc.queryForMap("SELECT transaction_key, status FROM payment WHERE order_id = ?", order))
+            .containsEntry("transaction_key", transactionKey).containsEntry("status", "SUCCESS");
+        assertThat(jdbc.queryForMap("SELECT point_amount, paid_amount FROM orders WHERE id = ?", order))
+            .containsEntry("point_amount", 0L).containsEntry("paid_amount", 4000L);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM stock_history WHERE order_id = ? AND cause = 'ORDER_RESERVATION'",
+            Long.class, order)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM stock_history WHERE order_id = ? AND cause = 'ORDER_RELEASE'",
+            Long.class, order)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM point_history WHERE cause = 'ORDER_USE'", Long.class)).isZero();
+    }
+
+    @Test
+    void applyingSameExactRejectionTwiceReleasesReservationOnlyOnce() {
+        var begin = transactions.beginConfirmation(user, order, PgCommands.forOrder(order));
+        pg.enqueuePlan(PgOperation.CREATE, begin.request().providerOrderId(), ResponsePlan.outcome(CreateOutcome.REJECT_BEFORE_CREATE));
+        var rejection = gateway.create(begin.request());
+        assertThat(rejection).isInstanceOf(PaymentObservation.RejectedNoEffect.class);
+
+        assertThat(applier.apply(begin.token(), rejection).order().status()).isEqualTo("PAYMENT_FAILED");
+        assertThat(applier.apply(begin.token(), rejection).order().status()).isEqualTo("PAYMENT_FAILED");
+
+        assertThat(stock()).isEqualTo(5);
+        assertThat(jdbc.queryForMap("SELECT status, failure_kind, transaction_key FROM payment WHERE order_id = ?", order))
+            .containsEntry("status", "FAILED").containsEntry("failure_kind", "REJECTED_NO_EFFECT").containsEntry("transaction_key", null);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM stock_history WHERE order_id = ? AND cause = 'ORDER_RELEASE'",
+            Long.class, order)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM stock_history WHERE order_id = ? AND cause = 'ORDER_RESERVATION'",
+            Long.class, order)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM point_history WHERE cause = 'ORDER_USE'", Long.class)).isZero();
+        assertThat(pg.state().transactions()).isEmpty();
+        assertThat(pg.state().counts().createReceived()).isEqualTo(1);
     }
 
     @Test

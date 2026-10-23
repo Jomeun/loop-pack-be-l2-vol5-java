@@ -25,6 +25,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -334,14 +335,16 @@ class PaymentTransactionServiceIntegrationTest {
 
             PaymentApplyResult amount = service.applyObservation(query,
                 observed(ObservationSource.QUERY, orderId, "tx-A", 999L, PgTransactionStatus.SUCCESS));
+            List<Map<String, Object>> afterAmount = fixture.conflicts(orderId);
             PaymentApplyResult multiple = service.applyObservation(query, new PaymentObservation.Conflict(ObservationSource.QUERY,
                 PaymentConflictCode.MULTIPLE_TRANSACTIONS, ConflictEvidence.ofCount(3)));
             service.applyObservation(query, observed(ObservationSource.QUERY, orderId, "tx-A", 1_000L, PgTransactionStatus.PENDING));
 
             assertAll(
                 () -> assertThat(amount.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
-                () -> assertThat(amount.conflictCode()).isEqualTo(PaymentConflictCode.AMOUNT_MISMATCH),
-                () -> assertThat(multiple.conflictCode()).isEqualTo(PaymentConflictCode.MULTIPLE_TRANSACTIONS),
+                () -> assertThat(afterAmount).singleElement().satisfies(row -> assertThat(row)
+                    .containsEntry("code", "AMOUNT_MISMATCH").containsEntry("observed_amount", 999L)),
+                () -> assertThat(multiple.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
                 () -> assertThat(fixture.conflicts(orderId)).singleElement().satisfies(row -> assertThat(row)
                     .containsEntry("code", "MULTIPLE_TRANSACTIONS").containsEntry("observed_count", 3)
                     .containsEntry("observed_amount", null)),
@@ -465,7 +468,6 @@ class PaymentTransactionServiceIntegrationTest {
             () -> assertThat(classifier.namedUniqueViolation(violation)).hasValue("uk_payment_transaction"),
             () -> assertThat(afterRollback).containsEntry("status", "UNKNOWN").containsEntry("transaction_key", null),
             () -> assertThat(recorded.outcome()).isEqualTo(PaymentApplyResult.Outcome.CONFLICT),
-            () -> assertThat(recorded.conflictCode()).isEqualTo(PaymentConflictCode.TRANSACTION_ALREADY_BOUND),
             () -> assertThat(fixture.conflicts(second)).singleElement().satisfies(row -> assertThat(row)
                 .containsEntry("code", "TRANSACTION_ALREADY_BOUND").containsEntry("observed_transaction_key", "tx-SHARED")),
             () -> assertThat(fixture.payment(second)).containsEntry("status", "UNKNOWN").containsEntry("transaction_key", null)

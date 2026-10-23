@@ -14,7 +14,6 @@ import com.loopers.fixture.pg.FixtureState;
 import com.loopers.fixture.pg.GateStatus;
 import com.loopers.fixture.pg.JournalEntry;
 import com.loopers.fixture.pg.PaymentStatus;
-import com.loopers.fixture.pg.PgFixtureServer;
 import com.loopers.fixture.pg.PgOperation;
 import com.loopers.fixture.pg.ResponsePlan;
 import com.loopers.fixture.pg.TransactionSnapshot;
@@ -28,7 +27,6 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -49,22 +47,16 @@ import static org.junit.jupiter.api.Assertions.assertAll;
  * 테스트 PG fixture 와 통신해 요청 형태와 관찰 변환을 본다. 회로 표본 집계는 PgLookupCircuitTest, TX B 반영은 범위가 아니다.
  */
 @DisplayName("PgHttpGateway 는 PG HTTP 계약대로 요청하고 응답을 관찰로 바꾼다.")
-class PgHttpGatewayContractTest {
+class PgHttpGatewayContractTest extends PgAdapterTestSupport {
 
-    private static final Duration OBSERVE_DEADLINE = Duration.ofSeconds(5);
-    private static final Duration FAST_POLL = Duration.ofMillis(5);
-    private static final Duration TASK_DEADLINE = Duration.ofSeconds(15);
     private static final String CALLBACK_PATH = "/api/v1/payments/callback";
 
-    private PgFixtureServer pg;
     private HttpServer callbackReceiver;
     private ExecutorService receiverWorkers;
-    private ExecutorService callers;
     private final AtomicInteger callbacksReceived = new AtomicInteger();
 
     @BeforeEach
-    void setUp() throws IOException {
-        pg = PgFixtureServer.start();
+    void startCallbackReceiver() throws IOException {
         receiverWorkers = Executors.newFixedThreadPool(2);
         callbackReceiver = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), 0), 0);
         callbackReceiver.createContext(CALLBACK_PATH, exchange -> {
@@ -75,20 +67,15 @@ class PgHttpGatewayContractTest {
         });
         callbackReceiver.setExecutor(receiverWorkers);
         callbackReceiver.start();
-        callers = Executors.newFixedThreadPool(10);
     }
 
     @AfterEach
-    void tearDown() throws InterruptedException {
+    void stopCallbackReceiver() throws InterruptedException {
         try {
-            callers.shutdownNow();
-            assertThat(callers.awaitTermination(TASK_DEADLINE.toSeconds(), TimeUnit.SECONDS)).as("호출 스레드 종료").isTrue();
             callbackReceiver.stop(0);
+        } finally {
             receiverWorkers.shutdownNow();
             assertThat(receiverWorkers.awaitTermination(TASK_DEADLINE.toSeconds(), TimeUnit.SECONDS)).as("수신 대역 종료").isTrue();
-        } finally {
-            pg.close();
-            assertThat(pg.isTerminated()).as("PG fixture 종료").isTrue();
         }
     }
 
@@ -343,15 +330,6 @@ class PgHttpGatewayContractTest {
 
     private static String heldOrderId(int index) {
         return "LP-ORD-00000005" + (40 + index);
-    }
-
-    /** 클라이언트가 응답을 받은 뒤에도 fixture handler 의 journal 완료는 조금 늦을 수 있어 기한 안에 기다린다. */
-    private void awaitHandlersFinished() {
-        await().atMost(OBSERVE_DEADLINE).until(() -> {
-            FixtureState state = pg.state();
-            return state.activeRequests() == 0
-                && state.journal().stream().allMatch(entry -> entry.completedAt() != null);
-        });
     }
 
     @FunctionalInterface

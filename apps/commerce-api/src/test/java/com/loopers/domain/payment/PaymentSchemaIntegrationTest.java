@@ -175,7 +175,7 @@ class PaymentSchemaIntegrationTest {
                 Money.of(7_000L), claimedAt);
             entityManager.persist(payment);
             entityManager.flush();
-            payment.recordObservation(new PaymentCheckToken(payment.getId(), 42L, ObservationSource.CREATE, false, null),
+            payment.recordObservation(new PaymentCheckToken(payment.getId(), 42L, ObservationSource.CREATE, false),
                 new PaymentObservation.LocalNotDispatched(LocalNotDispatchedReason.POOL_ACQUIRE_TIMEOUT), claimedAt);
             entityManager.persist(PaymentConflictModel.first(payment.getId(), PaymentConflictCode.MULTIPLE_TRANSACTIONS,
                 new ConflictEvidence(null, null, null, PgTransactionStatus.PENDING, 2), claimedAt));

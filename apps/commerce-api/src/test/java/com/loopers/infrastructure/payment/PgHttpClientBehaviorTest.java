@@ -3,13 +3,10 @@ package com.loopers.infrastructure.payment;
 import com.loopers.fixture.pg.FixtureState;
 import com.loopers.fixture.pg.GateStatus;
 import com.loopers.fixture.pg.JournalEntry;
-import com.loopers.fixture.pg.PgFixtureServer;
 import com.loopers.fixture.pg.PgOperation;
 import com.loopers.fixture.pg.ResponsePlan;
 import org.apache.hc.core5.http.ConnectionClosedException;
 import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -23,8 +20,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
@@ -40,32 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
  * UNKNOWN·재고 유지 같은 업무 판정의 검증이 아니다.
  */
 @DisplayName("PG 전용 HTTP client 는 풀·응답 timeout·retry/redirect 비활성 설정대로 동작한다.")
-class PgHttpClientBehaviorTest {
-
-    private static final Duration OBSERVE_DEADLINE = Duration.ofSeconds(5);
-    /** 붙잡은 요청은 client 응답 timeout(1초)이 지나면 풀을 비우므로, 그 전에 다음 단계를 진행하도록 짧게 관찰한다. */
-    private static final Duration FAST_POLL = Duration.ofMillis(5);
-    private static final Duration TASK_DEADLINE = Duration.ofSeconds(15);
-
-    private PgFixtureServer pg;
-    private ExecutorService callers;
-
-    @BeforeEach
-    void setUp() {
-        pg = PgFixtureServer.start();
-        callers = Executors.newFixedThreadPool(10);
-    }
-
-    @AfterEach
-    void tearDown() throws InterruptedException {
-        try {
-            callers.shutdownNow();
-            assertThat(callers.awaitTermination(TASK_DEADLINE.toSeconds(), TimeUnit.SECONDS)).as("호출 스레드 종료").isTrue();
-        } finally {
-            pg.close();
-            assertThat(pg.isTerminated()).as("PG fixture 종료").isTrue();
-        }
-    }
+class PgHttpClientBehaviorTest extends PgAdapterTestSupport {
 
     @DisplayName("설정한 base-url 과 고정 계정 헤더로 요청한다.")
     @Test
@@ -207,15 +177,6 @@ class PgHttpClientBehaviorTest {
 
     private static String heldOrderId(int index) {
         return "LP-ORD-00000003" + (10 + index);
-    }
-
-    /** 클라이언트가 응답을 받은 뒤에도 fixture handler 의 journal 완료는 조금 늦을 수 있어 기한 안에 기다린다. */
-    private void awaitHandlersFinished() {
-        await().atMost(OBSERVE_DEADLINE).until(() -> {
-            FixtureState state = pg.state();
-            return state.activeRequests() == 0
-                && state.journal().stream().allMatch(entry -> entry.completedAt() != null);
-        });
     }
 
     private static String describe(Throwable failure) {

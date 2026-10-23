@@ -11,14 +11,11 @@ import com.loopers.domain.payment.PgTransactionStatus;
 import com.loopers.fixture.pg.CreateOutcome;
 import com.loopers.fixture.pg.FixtureState;
 import com.loopers.fixture.pg.GateStatus;
-import com.loopers.fixture.pg.PgFixtureServer;
 import com.loopers.fixture.pg.PgOperation;
 import com.loopers.fixture.pg.ResponsePlan;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -32,8 +29,6 @@ import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
@@ -49,33 +44,9 @@ import static org.junit.jupiter.api.Assertions.assertAll;
  * confirm 응답·TX A/B·재고 반환은 범위가 아니며 I3·I4 에서 같은 사례로 다시 확인한다.
  */
 @DisplayName("pgCreate 회로는 사전 확인·실제 권한·미발송 판정을 분리하고 승인한 분류대로 생성 표본을 기록한다.")
-class PgCreateCircuitTest {
+class PgCreateCircuitTest extends PgAdapterTestSupport {
 
-    private static final Duration OBSERVE_DEADLINE = Duration.ofSeconds(5);
-    /** 붙잡은 요청은 client 응답 timeout(1초)이 지나면 끝나므로 그 전에 다음 단계를 진행하도록 짧게 관찰한다. */
-    private static final Duration FAST_POLL = Duration.ofMillis(5);
-    private static final Duration TASK_DEADLINE = Duration.ofSeconds(15);
     private static final PaymentObservation CREATE_UNAVAILABLE = new PaymentObservation.Unavailable(ObservationSource.CREATE);
-
-    private PgFixtureServer pg;
-    private ExecutorService callers;
-
-    @BeforeEach
-    void setUp() {
-        pg = PgFixtureServer.start();
-        callers = Executors.newFixedThreadPool(10);
-    }
-
-    @AfterEach
-    void tearDown() throws InterruptedException {
-        try {
-            callers.shutdownNow();
-            assertThat(callers.awaitTermination(TASK_DEADLINE.toSeconds(), TimeUnit.SECONDS)).as("호출 스레드 종료").isTrue();
-        } finally {
-            pg.close();
-            assertThat(pg.isTerminated()).as("PG fixture 종료").isTrue();
-        }
-    }
 
     @DisplayName("사전 확인할 때,")
     @Nested
@@ -421,14 +392,6 @@ class PgCreateCircuitTest {
     private void awaitGatesWaiting(int count) {
         await().atMost(OBSERVE_DEADLINE).pollInterval(FAST_POLL).until(() ->
             pg.state().gates().stream().filter(gate -> gate.status() == GateStatus.WAITING).count() == count);
-    }
-
-    private void awaitHandlersFinished() {
-        await().atMost(OBSERVE_DEADLINE).until(() -> {
-            FixtureState state = pg.state();
-            return state.activeRequests() == 0
-                && state.journal().stream().allMatch(entry -> entry.completedAt() != null);
-        });
     }
 
     private static PaymentRequest request(String providerOrderId) {

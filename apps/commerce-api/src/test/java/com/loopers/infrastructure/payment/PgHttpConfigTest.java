@@ -5,7 +5,12 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.springboot3.circuitbreaker.autoconfigure.CircuitBreakerAutoConfiguration;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.HttpRoute;
+import org.apache.hc.client5.http.config.Configurable;
+import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
+import org.apache.hc.core5.http.HttpHost;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,6 +20,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestClient;
 
 import java.net.URI;
@@ -126,6 +132,39 @@ class PgHttpConfigTest {
                 .requestInterceptors(interceptors::addAll);
 
             assertThat(interceptors).isEmpty();
+        });
+    }
+
+    @Test
+    void appliesTimeoutsPoolAndNoRetryOrRedirectToActualClient() {
+        RUNNER.run(context -> {
+            var client = context.getBean("pgHttpClient", CloseableHttpClient.class);
+            var request = ((Configurable) client).getConfig();
+            var pool = (PoolingHttpClientConnectionManager) ReflectionTestUtils.getField(client, "connManager");
+            assertThat(pool).isNotNull();
+            ConnectionConfig connection = ReflectionTestUtils.invokeMethod(pool, "resolveConnectionConfig",
+                new HttpRoute(new HttpHost("http", "127.0.0.1", 18080)));
+            assertThat(connection).isNotNull();
+            assertThat(connection.getConnectTimeout().toMilliseconds()).isEqualTo(300);
+            assertThat(connection.getSocketTimeout().toMilliseconds()).isEqualTo(1000);
+            assertThat(request.getConnectionRequestTimeout().toMilliseconds()).isEqualTo(200);
+            assertThat(request.getResponseTimeout().toMilliseconds()).isEqualTo(1000);
+            assertThat(request.isRedirectsEnabled()).isFalse();
+            assertThat(pool.getMaxTotal()).isEqualTo(10);
+            assertThat(pool.getDefaultMaxPerRoute()).isEqualTo(10);
+
+            Object chain = ReflectionTestUtils.getField(client, "execChain");
+            List<String> handlers = new ArrayList<>();
+            while (chain != null) {
+                Object handler = ReflectionTestUtils.getField(chain, "handler");
+                assertThat(handler).isNotNull();
+                handlers.add(handler.getClass().getSimpleName());
+                chain = ReflectionTestUtils.getField(chain, "next");
+            }
+            assertThat(handlers).contains("MainClientExec")
+                .noneMatch(name -> name.contains("Retry") || name.contains("Redirect"));
+            assertThat(CircuitBreaker.class.getProtectionDomain().getCodeSource().getLocation().toString())
+                .contains("resilience4j-circuitbreaker-2.2.0.jar");
         });
     }
 
