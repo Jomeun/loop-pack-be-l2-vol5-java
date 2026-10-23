@@ -156,7 +156,7 @@ Point는 충전 금액이 양수인지 확인하고 잔액을 증가시킨 뒤 �
 
 신규 결제는 PG를 사용한다. DRAFT 주문 생성과 결제 시작을 구분하고, PG 호출 전에 가용 재고를 선차감해 주문별로 예약한다. 검증된 결제 성공을 확인한 뒤 주문을 CONFIRMED로 바꾼다. 포인트 차감·주문 원인의 포인트 사용 이력은 만들지 않으며, Point 행의 존재·잔액을 신규 결제의 전제조건으로 사용하지 않는다.
 
-이 절의 PG 흐름은 목표 계약이며 구현 전이다. 아래 접힌 POINT 기록은 이전 구현과 검증의 근거다. 그 기록의 단일 TX·포인트 잠금·포인트 부족·중복 확정 오류 규칙을 신규 PG 주문에 적용하지 않는다. 클래스·저장·잠금 상세는 관련 구조·도메인 설계에 반영하며, 미정 사항을 구현자가 임의로 채우지 않는다.
+이 절의 PG 흐름은 I4·I5에서 구현한 현행 계약이다. 구현·실행 범위와 한계는 이 문서 마지막의 I4·I5 검증 근거를 따른다. 아래 접힌 POINT 기록은 이전 구현과 검증의 근거다. 그 기록의 단일 TX·포인트 잠금·포인트 부족·중복 확정 오류 규칙을 신규 PG 주문에 적용하지 않는다. 클래스·저장·잠금 상세는 관련 구조·도메인 설계에 반영하며, 미정 사항을 구현자가 임의로 채우지 않는다.
 
 ### PG 결제의 진입점과 보존 범위
 
@@ -610,6 +610,8 @@ Facade가 시작한 같은 물리 트랜잭션에 모든 변경을 포함한다.
 
 ### 4.3.2 보호 대상·공통 순서·조회 경계
 
+이 표는 접힌 이전 POINT 구현의 이력이다. 현행 PG의 잠금 순서는 위 TX A/B 계약을 따르며 Point를 잠그지 않는다.
+
 주 전략은 Order·Point·Product 행의 비관적 쓰기 잠금(`PESSIMISTIC_WRITE`)이다. Stock은 Product에 포함된 VO이며 별도 재고 테이블·잠금 모델을 도입하지 않는다.
 
 |변경 경로|잠금 대상과 획득 순서|
@@ -840,7 +842,7 @@ DB warm·현재 scalar·후보/누적 인덱스·작은 트리·집계·페이�
 
 ### 위조 콜백 본문의 실제 controller 검증
 
-실습 요구 "조작한 callback 본문만으로 성공하지 않는지 확인"을 기존 [PG 콜백 수신 계약](./05-api-contract.md#pg-콜백-수신)·위 콜백 의사코드·[2.8 조회 표본 분류](./02-architecture.md#합의한-조회-회로-표본-분류)로 검증하는 구현 후 필수 기준이며 미실행이다. 새 상태·오류·정책을 추가하지 않는다.
+실습 요구 "조작한 callback 본문만으로 성공하지 않는지 확인"을 기존 [PG 콜백 수신 계약](./05-api-contract.md#pg-콜백-수신)·위 콜백 의사코드·[2.8 조회 표본 분류](./02-architecture.md#합의한-조회-회로-표본-분류)로 검증하는 필수 기준이다. 실제 A/B/C 사례는 PaymentRecoveryFlowIntegrationTest.forgedCallbackHasExactlyOneAuthoritativeReadAndNoExtraEffects로 구현했으며 실행 경계는 마지막 I5 근거를 따른다. 새 상태·오류·정책을 추가하지 않는다.
 
 fixture의 sendCallbacks는 저장 거래의 정상 snapshot만 보내므로 변경하지 않고 이 검증에 사용하지 않는다. 테스트의 HTTP client가 5.7 절차로 기동 전 선택·주입한 포트에서 실행 중인 commerce의 `POST /api/v1/payments/callback`에 조작한 JSON을 직접 보내고, commerce는 실제 adapter·pgLookup으로 [5.7](./05-api-contract.md#57-테스트-pg-제어와-상태-보존)의 테스트 PG를 권위 조회한다. 커머스 콜백 수신은 테스트 요청 수로 세며 fixture callbackSent와 혼동하지 않는다.
 
@@ -857,7 +859,7 @@ fixture의 sendCallbacks는 저장 거래의 정상 snapshot만 보내므로 변
 
 ### 업무 관찰 순서의 TX 경계 검증
 
-**분리 이유:** 생성/조회 HTTP 응답을 GATE로 잡아 둔 동안 다른 HTTP·TX를 끝내야 하는 사례는, 그 과정이 제품 읽기 timeout 1초를 넘으면 의도한 늦은 PENDING 대신 timeout만 검증한다. 테스트 환경이 빠를 것이라는 가정으로 해결하지 않으며, 제품 읽기 timeout·회로 초기값을 바꾸거나 테스트의 PG 읽기 timeout만 늘리지 않는다. 그래서 기존 "중복·경쟁·callback 선도착"과 "확인/충돌 반영 순서 역전"의 업무 순서 기대값은 이 절의 TX 경계 검증으로 옮기고, 실제 HTTP의 지연·timeout·유실·회로·정상 콜백 종결은 위 시나리오 표와 아래 실제 timeout·풀·회로 절의 증거로 유지한다. 기대값은 삭제·완화하지 않는다. 구현 후 필수 검증이며 미실행이다.
+**분리 이유:** 생성/조회 HTTP 응답을 GATE로 잡아 둔 동안 다른 HTTP·TX를 끝내야 하는 사례는, 그 과정이 제품 읽기 timeout 1초를 넘으면 의도한 늦은 PENDING 대신 timeout만 검증한다. 테스트 환경이 빠를 것이라는 가정으로 해결하지 않으며, 제품 읽기 timeout·회로 초기값을 바꾸거나 테스트의 PG 읽기 timeout만 늘리지 않는다. 그래서 기존 "중복·경쟁·callback 선도착"과 "확인/충돌 반영 순서 역전"의 업무 순서 기대값은 이 절의 TX 경계 검증으로 옮기고, 실제 HTTP의 지연·timeout·유실·회로·정상 콜백 종결은 위 시나리오 표와 아래 실제 timeout·풀·회로 절의 증거로 유지한다. 기대값은 삭제·완화하지 않는다. 실제 TX 경계 사례는 PaymentObservationOrderIntegrationTest로 구현했으며 실행 근거는 마지막 I5 절을 따른다.
 
 **통제:** 실제 PaymentTransactionService의 public TX 메서드를 프록시로 호출하고 실제 MySQL에 commit한다. 외부 HTTP 없이 adapter가 만들 수 있는 유효한 PaymentObservation(저장 외부 주문 ID·금액과 일치하는 거래 키·상태, 충돌 사례는 표에 적은 키·금액만 바꾼 값)과 PaymentCheckToken을 준비하고, 적용 순서는 테스트 장벽과 호출 순서로 정한다. 준비는 정상 beginConfirmation으로 주문을 PAYMENT_PENDING·UNKNOWN·재고 확보 상태로 만들고 CREATE 토큰(terminalAtStart=false)을 받는 것으로 시작한다. QUERY 토큰은 실제 prepareVerification으로 얻는다. 각 사례는 고유 주문을 쓰고 테스트 부모 TX를 두지 않으며 결과는 commit 뒤 새 TX로 읽는다. 장벽의 유한 대기(전체 10초 이내)는 HTTP timeout과 별개이며 finally에서 해제한다. 단순 mock 호출 순서나 순수 도메인 테스트는 이 검증을 대체하지 않고 보완 계층으로 유지한다.
 
@@ -880,7 +882,7 @@ fixture의 sendCallbacks는 저장 거래의 정상 snapshot만 보내므로 변
 
 ### 부모 잠금과 일반 조회의 실제 MySQL 검증
 
-아래는 구현 후 필수 검증이며 미실행이다. HTTP·재고 경쟁과 분리하여 업무 TX를 독립 connection으로 실행하고, 겹침은 유한 장벽/SQL 관측으로 통제한다. 공유 상품 때문에 직렬화되어 잠금 문제를 가리지 않도록 서로 다른 주문·키·상품을 사용한다. 테스트 부모 TX·동일 Entity 재사용은 금지하며 worker 종료/commit 뒤 새 TX로 결과를 읽는다.
+아래는 필수 검증 기준이다. PaymentParentLockIntegrationTest·PaymentOverlapEvidenceIntegrationTest로 구현했으며 실행 근거는 마지막 I5 절을 따른다. HTTP·재고 경쟁과 분리하여 업무 TX를 독립 connection으로 실행하고, 겹침은 유한 장벽/SQL 관측으로 통제한다. 공유 상품 때문에 직렬화되어 잠금 문제를 가리지 않도록 서로 다른 주문·키·상품을 사용한다. 테스트 부모 TX·동일 Entity 재사용은 금지하며 worker 종료/commit 뒤 새 TX로 결과를 읽는다.
 
 - **SQL/수명:** prepareConfirmation·TX A·prepareVerification·TX B·recordConstraintConflict 각각 첫 업무 데이터 접근 SQL이 Order PK SELECT FOR UPDATE인지 SQL 기록으로 확인한다. 엔티티뿐 아니라 스칼라·exists·native 조회도 같은 순서 검사에 포함하고, 연결/TX 초기화용 제어문은 분리한다. Payment/PaymentConflict에 FOR UPDATE가 없음을 확인한다. 콜백 스칼라 식별 TX는 prepareVerification 전에 끝나며 두 호출이 같은 TX/영속성 컨텍스트를 공유하지 않는지 확인한다. INSERT/UPDATE의 DB 내부 잠금 부재를 기대값으로 삼지 않는다.
 - **독립 첫 생성:** 두 TX A가 모두 Payment 일반 조회를 완료하고 INSERT 직전 장벽에 도달한 뒤에만 어느 쪽이든 INSERT를 실행한다. 각 TX의 조회 반환·장벽 도달 기록과 SQL 실행 순서로 이 겹침을 입증한다. IDENTITY INSERT가 save 시 실행될 수 있으므로 commit 직전이 아닌 실제 INSERT 직전에 장벽을 둔다. 이후 각 SEND 결과의 commit·결제/ORDER_RESERVATION 한 번·정확한 재고를 확인한다. 서로 다른 결제의 첫 충돌 요약도 두 TX가 모두 PaymentConflict 일반 조회를 완료한 뒤 첫 INSERT 직전 장벽에 도달해야 해제하며, 같은 방식으로 겹침과 각 CONFLICT 결과/요약 한 행의 commit을 확인한다. 이 서비스 경계 테스트는 PG를 호출하지 않으며, 409 응답 변환은 별도 API 경계에서 확인한다. 통제한 독립 키 사례의 deadlock/lock timeout은 실패이며 모든 경쟁에서 발생하지 않는다는 일반화는 하지 않는다.
@@ -892,7 +894,7 @@ fixture의 sendCallbacks는 저장 거래의 정상 snapshot만 보내므로 변
 
 ### 스키마 타입과 기존 데이터 전환 검증
 
-아래는 [3.6의 전환 순서와 열 타입·ORM 매핑](./03-domain-model.md#orders의-확장과-point-보존)을 확인하는 구현 후 필수 검증이며 미실행이다. 테스트용 새 스키마 생성과 기존 데이터 보존 전환을 별도 사례로 실행한다. 실제 DB 확인 결과만 근거로 쓰고 과거 DDL 로그나 문서의 SQL 예시를 현재 DB 상태의 확인으로 대체하지 않는다.
+아래는 [3.6의 전환 순서와 열 타입·ORM 매핑](./03-domain-model.md#orders의-확장과-point-보존)을 확인하는 필수 검증 기준이다. PaymentSchemaIntegrationTest·PgPaymentMigrationIntegrationTest로 구현했으며 테스트 DB의 실행 근거는 마지막 I5 절을 따른다. 테스트용 새 스키마 생성과 기존 데이터 보존 전환을 별도 사례로 실행한다. 실제 DB 확인 결과만 근거로 쓰고 과거 DDL 로그나 문서의 SQL 예시를 현재 DB 상태의 확인으로 대체하지 않는다.
 
 - **새 스키마의 열 타입:** 새 코드가 빈 테스트 MySQL에 만든 스키마를 `INFORMATION_SCHEMA.COLUMNS`의 DATA_TYPE·COLUMN_TYPE·문자 길이·IS_NULLABLE·collation으로 3.6 표와 비교한다. 신규 enum 열 5개(orders.payment_method, payment.status·failure_kind·verification_status, payment_conflict.code)는 native ENUM이 아닌 표의 VARCHAR 길이·nullable이어야 한다. orders.status·stock_history.cause는 ENUM이며 새 값을 포함한다. CHAR(36)·ASCII binary collation·TEXT 등 그 밖의 문자열 열도 표와 일치해야 한다. 불일치는 매핑 수정 대상이며 통과가 아니다. 새 스키마의 두 ENUM 허용값 목록은 보존 전환 뒤의 목록과도 비교해 차이를 기록한다.
 - **기존 데이터 보존 전환의 재현:** 테스트 MySQL에 과거 생성 DDL과 같은 orders·stock_history(기존 ENUM·기존 금액 열 이름)를 SQL로 준비하고, 과거 POINT CONFIRMED·DRAFT 주문과 ADMIN_CHANGE·ORDER_DEDUCTION 이력을 넣는다. 3.6의 사전 확인 → ENUM 확장 → 금액 열 이름 전환·POINT 보정 → 신규 테이블 생성 순서를 실행한다. 전환 전후 상태/원인별 건수와 기존 행의 금액·품목·이력 값이 같고, 확장한 열의 nullable·기본값이 바뀌지 않았는지 확인한다. 사전 확인에서는 기존 DRAFT의 used_point_amount·payment_amount null만 보고 아직 없는 payment_method는 조회하지 않는다. 열 추가·보정 뒤에는 DRAFT의 payment_method·point_amount·paid_amount가 null이고 기존 CONFIRMED의 payment_method가 POINT인지 확인한다.
@@ -900,6 +902,8 @@ fixture의 sendCallbacks는 저장 거래의 정상 snapshot만 보내므로 변
 - **중단 기준:** 사전 확인 결과가 3.6의 기대 정의·값과 다르면 전환 SQL을 실행하지 않고 그 결과를 실행 기록에 남긴다. 이 재현 검증의 통과를 로컬 loopers 등 실제 보존 대상 DB의 전환 완료로 쓰지 않으며, 그 전환은 별도 승인된 실행 단위에서 실제 SHOW CREATE TABLE·값 확인부터 다시 수행한다.
 
 ### 실제 timeout·풀·회로 전이
+
+최종 Apache bean의 timeout·풀·retry/redirect 실행 체인은 저장소의 PgHttpConfigTest.appliesTimeoutsPoolAndNoRetryOrRedirectToActualClient로 확인한다. I5 당시의 독립 임시 probe는 과거 실행 이력이며, 현재 설정 적용의 필수 근거를 임시 파일에만 두지 않는다. 이 설정 검사를 실제 connect timeout·네트워크 취소 재현으로 확대하지 않는다.
 
 - **읽기 timeout:** 실제 HTTP에서 header 전 DELAY와 본문 중단을 각각 재현해 경과 시간·원인·실패 표본·UNAVAILABLE·연결 반환을 확인한다. 플랫폼 오차를 허용한 제한시간 안에 종료하는지 검사하고 정확히 1000ms 또는 API 전체 1초를 assert하지 않는다. 이 HTTP timeout 사례의 테스트 전체 제한은 10초, worker 종료 대기는 5초로 두고 초과/종료 실패는 실패다.
 - **연결:** 닫힌 loopback port의 연결 거절을 실제 adapter로 확인한다. connect timeout 300ms의 설정 적용은 최종 Apache 설정으로 검증한다. 별도 통제 경로 없이 loopback 연결 거절을 실제 connect timeout 재현이라고 쓰지 않는다. 실제 connect timeout을 재현하지 못했다면 실행 근거에 그 한계를 남긴다.
@@ -994,3 +998,23 @@ I4 커밋 `58b5faf`와 마지막 검증 소스가 같음을 확인하고, 실제
 전체 실행은 `./gradlew :apps:commerce-api:test :apps:commerce-api:checkstyleMain :apps:commerce-api:checkstyleTest --offline`, 최종 보강 실행은 6개 I5 테스트 클래스 필터와 같은 Checkstyle task다. 전체 XML은 `/tmp/codex-i5-evidence/full-xml/`, 최종 XML은 `final-i5-xml/`, 실행별 집계·class/운영 소스·최종 소스 해시도 같은 디렉터리에 보존했다. build/test-results/test는 마지막 분류 대조 5건만 담으며 56건은 final-i5-xml/, 분류 5건은 classification-final-xml/에 보존했다. Java/테스트 외 기존 데이터 전환은 테스트 컨테이너의 별도 스키마에서만 실행했으며 실제 보존 대상 로컬 DB를 전환한 것이 아니다.
 
 **최종 구성과 한계:** 별도 독립 probe에서 실제 Apache client의 connect/socket/pool/response 제한 300/1000/200/1000ms·총/경로별 10, redirect=false, 실행 체인 `[ContentCompressionExec, ProtocolExec, ConnectExec, MainClientExec]`를 확인했다(자동 retry/redirect 실행 없음). 실제 로드된 Resilience4j는 2.2.0이다. 연결 거절은 재현했지만 별도 통제 네트워크에서의 실제 connect timeout은 재현하지 않았으며 300ms 설정 적용과 구분한다. 단일 실행 결과를 운영 적정값·장시간 안정성·무작위 경합/부하 시험으로 확대하지 않는다. I2/I3 전체 코드 교차 검토·글 비교 실험·실제 제출은 이 실행 완료와 별개다.
+
+
+### F5·Claude 검토 보완과 최종 회귀 — 2026-10-23
+
+사용자가 실습·발제 대조에서 발견한 F5 보완과 Claude 검토 확인을 승인했다. 기존 3.6의 저장 정합성 계약대로 PaymentTransactionService.requireConsistent에서 PG의 pointAmount=0, 대기의 paidAmount=null, 성공의 paidAmount=결제 amount를 검사한다. 실패 paidAmount=null 검사는 유지하며 손상 값을 정상 값으로 덮어쓰지 않는다. 같은 시도 재요청·확인 준비·결과 반영·제약 충돌 기록이 공통 검사를 사용한다. 정책·스키마·timeout/회로 수치는 변경하지 않았다.
+
+|보완|재현 가능한 코드·검증|
+|---|---|
+|F5 저장 금액 정합성|PaymentStoredConsistencyIntegrationTest 10건. UNKNOWN/PENDING/SUCCESS/FAILED의 손상 값과 null, confirm/reconcile/callback의 500·PG 추가 호출 0·주문/결제/상품/포인트/이력/확인 정보 보존을 실제 HTTP·MySQL로 확인했다. CREATE/QUERY 확인 준비 뒤 값이 손상된 경우도 실제 결과 TX에서 다시 검사해 rollback한다. 정상 API가 손상 값을 생성한다는 주장은 아니다|
+|재고 부족의 직접 효과 수|OrderConfirmFacadeIntegrationTest의 여러 품목 rollback/관리자 재고 감소와 OrderV1ApiE2ETest에 create 0·거래 0을 직접 확인했다. 과거 ORDER_DEDUCTION 부재만 보던 검사를 현재 ORDER_RESERVATION/ORDER_RELEASE 부재로 바꾸고 DB snapshot 보호는 유지했다. 포인트 부족 PG 성공 검사의 메서드 이름도 기대와 맞췄다|
+|성공 저장 실패 뒤 복구|OrderTransactionIntegrationTest.respondsInternalServerErrorOnTechnicalFailure가 같은 PG 거래 키·재고 3·예약 1·반환/ORDER_USE 0과 두 번째 reconcile 뒤 동일 업무 효과를 확인한다. create 1, 주문별 조회 1·그다음 키 조회 1을 분리한다|
+|정확한 422 재적용|OrderTransactionIntegrationTest.applyingSameExactRejectionTwiceReleasesReservationOnlyOnce가 실제 adapter의 RejectedNoEffect를 실제 DB TX에 두 번 적용한다. 거래 0·create 1·키 없음·실패 상태·재고 5·반환 1·예약 1을 확인한다|
+|관리자 값 응답|OrderAdminV1ApiTest.detailAndPageExposeStoredPgStatesWithoutQueryingPg 4건이 UNKNOWN/PENDING/SUCCESS/FAILED의 상세·목록 상태/금액/확인 정보/URL과 PG 호출·확인 정보 변화 0을 확인한다. 기존 목록 PENDING 직접 검사가 없었던 것은 아니며 이번에 상태별 상세·목록을 보강했다|
+|최종 Apache 적용 근거|PgHttpConfigTest.appliesTimeoutsPoolAndNoRetryOrRedirectToActualClient가 실제 client bean의 connect/socket/pool/response 300/1000/200/1000ms, 풀 총/경로별 10, redirect=false, retry/redirect exec 부재와 실제 로드된 Resilience4j 2.2.0을 검사한다. 기존 interceptor 부재·실제 HTTP retry/redirect/timeout 검사는 유지한다. I5 당시 임시 probe는 이력이며 현재 검사의 필수 소스가 아니다. 내부 필드/메서드 리플렉션 검사는 사용 중인 Apache 버전에 종속되어 버전 변경 시 재검토한다|
+
+최종 소스의 관련 82건과 Checkstyle main/test가 먼저 실제 실행으로 통과했다. 이후 같은 Java/리소스 280파일이 유지된 전체 commerce-api check가 **829건·failure/error/skip 0(ArchUnit 3 포함)**으로 통과했다(5분 9초). Checkstyle main 157파일·test 120파일 위반 0이며 전체 check에서는 동일 소스의 직전 검사 결과로 UP-TO-DATE였다. 82건은 전체 829건에 포함되므로 합산하지 않는다. Claude가 보고한 수정 전 813건은 이 수정 버전의 근거로 대신하지 않는다.
+
+일반 재현은 `./gradlew :apps:commerce-api:check --rerun-tasks --offline`로 가능하다. 실제 이번 전체 실행은 `./gradlew :apps:commerce-api:check --init-script /tmp/codex-w5-review-fix/isolated.init.gradle --offline`이며 init script는 test의 binary/XML/HTML 출력 경로만 분리했다. 테스트·제품 설정은 바꾸지 않았다. 결과는 /tmp/codex-w5-review-fix의 full-xml/·full-summary.json·full-check.log·full-source-sha256.json, 관련 검사는 related-xml/·related-summary.json에 보존했다. 이 임시 출력 없이도 저장소의 위 테스트를 재실행할 수 있으며 핵심 수량·판정·한계는 이 절에 남긴다.
+
+문서의 현행 구현 전/미실행 표기는 구현·사례별 근거와 맞췄다. 접힌 이전 POINT의 Order→Point→Product 표는 역사 기록이므로 유지하고 현행 PG가 아님을 명시했다. 2.9에는 GET 최대 1회·자동 간격 해당 없음과 단계별 대기 제한을 명시했으며 합계 1500ms를 전체 deadline으로 보장하지 않는다. 미발송 실패·반환(A.32)의 한 시도 소진 비용, 인증 없는 콜백의 확인 정보/요약 오염 가능성, UNKNOWN 예약 장기 점유는 승인된 범위의 남은 한계이며 변경하지 않았다. PR·기술 글은 별도 I6 산출물로 남아 있다. 이번 변경을 stage/commit하지 않았다.
