@@ -18,6 +18,8 @@
 
 2026-10-23 I5도 경쟁·장애 회복·DB/PG 유지 재시작과 관련 회귀를 완료했다. 저장 품목 정합성 검사 누락을 기존 계약대로 보완했으며 제품 정책/timeout/회로 값은 유지했다. 전체 회귀 805건과 최종 I5 보강 56건 및 별도 분류 검증 5건의 실행 범위·자원 종료·허용 한계는 [I5 검증 근거](./sections/04-use-cases.md#i5-경쟁장애-회복재시작-검증-근거--2026-10-23)를 따른다. 구현 종료 시에는 사용자 요청에 따라 스테이징하지 않았고, 이후 사용자의 추가 요청으로 I5 코드·테스트와 기준 설계의 검증 기록을 스테이징했다. 커밋은 사용자가 직접 수행한다. 아래 I4 시점의 I5 미검증 설명은 당시 이력이다.
 
+2026-10-25 PG 테스트 fixture를 별도 모듈 `apps/pg-simulator`의 단독 실행 앱으로 전환하는 목표 설계를 작성했다. 사용자가 방향과 주요 결정(JDK HttpServer, `amount % 3` 결과 규칙, 자동 처리 지연 1초, PG main에는 확장점만 두고 장애 주입은 테스트 프록시로 분리)을 승인했고 상세 설계는 검토 대기다. **미구현**이며 현재 코드는 테스트 fixture를 사용한다. 기준은 [2.10](./sections/02-architecture.md#210-pg-시뮬레이터-앱의-책임과-수명)·[5.7](./sections/05-api-contract.md#57-테스트-pg-제어와-상태-보존)·[A.33](./sections/appendix-decisions.md#a33-pg-단독-실행-앱으로의-전환)이며, 5.5 계약·commerce-api main 코드·기존 테스트 기대값은 바뀌지 않는다.
+
 2026-10-23 후속 검토에서 저장 결제 금액 정합성 누락(F5)을 기존 계약대로 보완했고, Claude 검토의 유효한 테스트 공백·최종 Apache 설정의 재현 가능한 근거·낡은 현재 상태 문구도 정리했다. I5는 사용자가 715bd0e로 커밋한 상태이며 이 후속 변경은 미스테이징·미커밋이다. 최종 check 829건·실패/오류/skip 0, Checkstyle·ArchUnit 통과의 경계는 [F5·Claude 검토 보완 근거](./sections/04-use-cases.md#f5claude-검토-보완과-최종-회귀--2026-10-23)를 따른다. PR·기술 글 작성은 별도 미완료다.
 
 ## 문서 구성
@@ -32,8 +34,8 @@ PG 결제 전환의 목표 흐름과 API 계약을 정리했다. 신규 DRAFT의
 |문서|담당 범위|
 |---|---|
 |[1. 버드뷰](./sections/01-overview.md)|시스템 개요, 구성과 기능 범위|
-|[2. 구조와 의존](./sections/02-architecture.md)|패키지·의존·Repository, PG Facade·로컬 TX 담당 객체, HTTP/회로 초기값·테스트 내부 PG 서버 책임|
+|[2. 구조와 의존](./sections/02-architecture.md)|패키지·의존·Repository, PG Facade·로컬 TX 담당 객체, HTTP/회로 초기값·PG 단독 실행 앱 책임|
 |[3. 도메인 관계](./sections/03-domain-model.md)|도메인 관계·상태·저장 필드와 제약, POINT 데이터 보존·삭제 정책|
 |[4. 대표 흐름](./sections/04-use-cases.md)|PG 시작·콜백·대사의 잠금·TX·메서드 의사코드, 이전 POINT 기록과 기존 기능|
-|[5. API 계약과 주요 규칙](./sections/05-api-contract.md)|공통 계약, 고객·관리자·콜백 API, 로컬 PG HTTP·fixture 메서드 제어/컨텍스트 재시작 계약과 대표 기대값|
+|[5. API 계약과 주요 규칙](./sections/05-api-contract.md)|공통 계약, 고객·관리자·콜백 API, 로컬 PG HTTP·테스트 래퍼/프록시 제어/컨텍스트 재시작 계약과 대표 기대값|
 |[부록 A. 설계 대안과 선택 근거](./sections/appendix-decisions.md)|판단 근거·대안이 유리한 조건·숨은 비용·가정·재검토 조건. [PG 판단 색인](./sections/appendix-decisions.md#a29-pg-판단-근거-색인)|

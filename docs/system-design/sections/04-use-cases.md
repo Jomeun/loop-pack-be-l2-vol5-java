@@ -804,7 +804,7 @@ DB warm·현재 scalar·후보/누적 인덱스·작은 트리·집계·페이�
 
 |경계·목표 테스트|필수 입력/통제|관찰·기대 결과|
 |---|---|---|
-|PG fixture 자체 계약|임의 포트·고유 주문·메모리 store|202 PENDING/200 SUCCESS/422 무효과, 동일 orderId 2회 생성 시 다른 거래 2건, 조회 0/1/복수, state 변경과 callback 전송 분리, reset/종료|
+|PG fixture 자체 계약(2026-10-25 목표: pg-simulator 모듈 테스트와 테스트 래퍼 테스트로 나눔, 아래 [PG 단독 실행 앱 전환의 검증](#pg-단독-실행-앱-전환의-검증--2026-10-25-목표))|임의 포트·고유 주문·메모리 store|202 PENDING/200 SUCCESS/422 무효과, 동일 orderId 2회 생성 시 다른 거래 2건, 조회 0/1/복수, state 변경과 callback 전송 분리, reset/종료|
 |PgHttpGatewayContractTest|실제 RestClient+Apache → 테스트 내부 PG HTTP 서버|method/path/header/숫자 금액/문자열 ID·URI 인코딩, 정상/손상 JSON·식별/금액 불일치·거래 없음, create 1회/조회 최대 1회, redirect 대상 수신 0|
 |PgCircuitIntegrationTest|Boot YAML registry+실제 adapter, 케이스별 새 회로|2.8의 성공/실패/제외·recordResult CONFLICT 보존·회로 밖 fallback, POST는 pgCreate·GET은 pgLookup·로컬 TX 제외, 공통 초기값/각 Customizer 실제 적용|
 |Payment/PaymentConflict 도메인 테스트|저장 상태·관찰·토큰을 순수 값으로 입력|불변조건·종결 중복·반영 순서·terminalAtStart·충돌 유형, 프레임워크 없이 전이 검증|
@@ -1018,3 +1018,15 @@ I4 커밋 `58b5faf`와 마지막 검증 소스가 같음을 확인하고, 실제
 일반 재현은 `./gradlew :apps:commerce-api:check --rerun-tasks --offline`로 가능하다. 실제 이번 전체 실행은 `./gradlew :apps:commerce-api:check --init-script /tmp/codex-w5-review-fix/isolated.init.gradle --offline`이며 init script는 test의 binary/XML/HTML 출력 경로만 분리했다. 테스트·제품 설정은 바꾸지 않았다. 결과는 /tmp/codex-w5-review-fix의 full-xml/·full-summary.json·full-check.log·full-source-sha256.json, 관련 검사는 related-xml/·related-summary.json에 보존했다. 이 임시 출력 없이도 저장소의 위 테스트를 재실행할 수 있으며 핵심 수량·판정·한계는 이 절에 남긴다.
 
 문서의 현행 구현 전/미실행 표기는 구현·사례별 근거와 맞췄다. 접힌 이전 POINT의 Order→Point→Product 표는 역사 기록이므로 유지하고 현행 PG가 아님을 명시했다. 2.9에는 GET 최대 1회·자동 간격 해당 없음과 단계별 대기 제한을 명시했으며 합계 1500ms를 전체 deadline으로 보장하지 않는다. 미발송 실패·반환(A.32)의 한 시도 소진 비용, 인증 없는 콜백의 확인 정보/요약 오염 가능성, UNKNOWN 예약 장기 점유는 승인된 범위의 남은 한계이며 변경하지 않았다. PR·기술 글은 별도 I6 산출물로 남아 있다. 이번 변경을 stage/commit하지 않았다.
+
+### PG 단독 실행 앱 전환의 검증 — 2026-10-25 목표
+
+**상태:** 목표 설계이며 미실행이다. 구조는 [2.10](./02-architecture.md#210-pg-시뮬레이터-앱의-책임과-수명)·[5.7](./05-api-contract.md#57-테스트-pg-제어와-상태-보존), 결정은 [A.33](./appendix-decisions.md#a33-pg-단독-실행-앱으로의-전환)을 따른다. 위 검증 경계·시나리오의 기대값은 바꾸지 않는다.
+
+|단계|검증|통과 기준|
+|---|---|---|
+|PG 모듈|5.5 계약(202/200/422/400/404·동일 orderId 복수 거래·조회 0/1/복수), `amount % 3` 세 경로, 자동 처리의 지연 뒤 상태 변경·콜백 1회·실패 시 재전송 없음, 자동 처리 끈 상태의 상태 변경·콜백 0, 콜백 결과 구분, close 뒤 worker 종료|모듈 테스트 fail/error 0. commerce-api 테스트 classpath에서 PG 클래스 사용 가능|
+|테스트 래퍼·프록시|reply 4종(DELAY·GATE·CLOSE_EARLY·RAW)이 PG 거래 효과 뒤 적용됨, 400 검증 실패 시 plan 미소비, createOutcome과 reply의 소비 정렬, 프록시 수신 수 = PG 수신 수, gate 시간 초과·close 중 응답 없이 종료, reset busy 거절|래퍼 테스트 fail/error 0|
+|기존 테스트 전환|PG fixture를 쓰는 commerce-api 테스트 전체|기대값·검증 내용 변경 없이 fail/error 0. import 정리 외 변경은 이유를 기록. 5주차 fixture 자체 테스트는 메서드별 이동/제거 근거를 남김|
+|수동 실행|PG 앱(18080)과 commerce-api를 함께 실행. 6000원·7000원·8000원 같은 세 금액 경로의 confirm 응답과 최종 주문 상태, commerce 중지 중 자동 콜백 유실 뒤 재기동·reconcile 회복|실제 실행 기록. 자동화 테스트 통과로 대체하지 않음|
+|전체 회귀|`check`(테스트·Checkstyle·ArchUnit)|fail/error 0, 의도한 skip만. ArchUnit이 pg-simulator 클래스를 규칙 대상으로 잡지 않음|

@@ -429,7 +429,7 @@ Soft Delete된 Brand와 Product를 관리자 목록·상세에 포함할지는 �
 
 ## 5.5 로컬 PG HTTP 계약
 
-커머스와 별도 HTTP 경계를 가진 테스트용 PG의 계약이다. 실제 카드·실금전·외부 PG 계정은 사용하지 않는다. 아래 생성·거래 조회·주문별 조회 세 요청은 고정 제공자 계정 `X-USER-ID: 135135`를 사용한다. 이 헤더는 커머스 고객 인증과 별개다.
+커머스와 별도 HTTP 경계를 가진 로컬 PG의 계약이다. 수동 실행 앱과 테스트가 같은 PG 코드([2.10](./02-architecture.md#210-pg-시뮬레이터-앱의-책임과-수명))로 이 계약을 제공한다. 실제 카드·실금전·외부 PG 계정은 사용하지 않는다. 아래 생성·거래 조회·주문별 조회 세 요청은 고정 제공자 계정 `X-USER-ID: 135135`를 사용한다. 이 헤더는 커머스 고객 인증과 별개다.
 
 |요청|입력|응답|
 |---|---|---|
@@ -483,7 +483,7 @@ Content-Type: application/json
 }
 ```
 
-PG는 callbackUrl로 아래 알림을 보낼 수 있다. 콜백의 유실·중복·지연·순서 변경을 제어해 검증하며, 즉시 성공 응답 뒤 콜백이 와도 추가 효과가 없어야 한다. 거래 상태를 응답하는 것과 콜백 전달 성공은 서로 다른 사실이다.
+PG는 callbackUrl로 아래 알림을 보낼 수 있다. 수동 실행 앱은 금액 규칙에 따른 자동 처리로 1회 보내고(2.10), 테스트는 명시적으로 보낸다(5.7). 테스트에서는 콜백의 유실·중복·지연·순서 변경을 제어해 검증하며, 즉시 성공 응답 뒤 콜백이 와도 추가 효과가 없어야 한다. 거래 상태를 응답하는 것과 콜백 전달 성공은 서로 다른 사실이다.
 
 ```json
 {
@@ -515,15 +515,69 @@ PG 구현에 필요한 정책은 아래 기준 절에 작성했다. 아래 항�
 |상태·저장|[3.5~3.6](./03-domain-model.md#35-pg-결제의-상태와-불변조건): 상태·필드·제약·POINT 보정|
 |TX·처리 순서|[4.3](./04-use-cases.md#43-주문-확정): TX A/B·잠금·공통 결과 반영·경쟁 의사코드|
 |HTTP/회로|[2.8~2.9](./02-architecture.md#28-pg-http-도구와-테스트-서버의-구성): 분류·빈/설정·fallback·초기값 근거·시간 한계|
-|PG 코드/수명|[2.10](./02-architecture.md#210-테스트-pg-서버의-책임과-수명): 테스트 fixture·책임·상태·자원 정리|
-|테스트 제어/수명|[5.7](#57-테스트-pg-제어와-상태-보존): 결정적 장애/콜백·관측·초기화·컨텍스트 재시작|
+|PG 코드/수명|[2.10](./02-architecture.md#210-pg-시뮬레이터-앱의-책임과-수명): PG 단독 실행 앱(2026-10-25 목표, 미구현)·모듈·결과 규칙·자동 처리·자원 정리|
+|테스트 제어/수명|[5.7](#57-테스트-pg-제어와-상태-보존): 테스트 래퍼·장애 주입 프록시, 결정적 장애/콜백·관측·초기화·컨텍스트 재시작|
 |검증|[4.5](./04-use-cases.md#45-pg-연동의-검증과-관찰): 계층별 필수 검증·회귀 전환·실행 근거|
 
 ## 5.7 테스트 PG 제어와 상태 보존
 
+**상태:** 2026-10-25 PG 단독 실행 앱 전환([2.10](./02-architecture.md#210-pg-시뮬레이터-앱의-책임과-수명), [A.33](./appendix-decisions.md#a33-pg-단독-실행-앱으로의-전환))에 맞춘 목표 설계이며 사용자 검토 대기·미구현이다. 아래 "테스트 구성과 책임 분리"가 새로 추가된 부분이고, 나머지 소절의 제어 메서드·plan·관측·콜백 판정·수명 계약은 **테스트가 보는 의미를 유지**한다. 각 소절에서 바뀐 것은 구현 위치뿐이며, 바뀐 곳에 그 사실을 적었다. R3 전환 전까지 실제 코드는 5주차 fixture다.
+
+### 테스트 구성과 책임 분리
+
+```text
+commerce adapter ──HTTP──▶ PgFaultProxy (commerce-api test) ──HTTP──▶ PgSimulator (pg-simulator main)
+                             · 수신 기록·카운터                        · 5.5 계약·거래 저장
+                             · plan의 reply 적용                       · ScriptedOutcomePolicy로 결과 결정
+                               (DELAY·GATE·CLOSE_EARLY·RAW)            · 자동 처리 DISABLED
+commerce callback ◀──HTTP── PgSimulator.callbacks()  (테스트 래퍼가 명시 호출할 때만, 프록시를 거치지 않음)
+```
+
+commerce-api 테스트 소스의 `com.loopers.fixture.pg`에 아래 래퍼를 둔다. 기존 테스트가 쓰는 공개 API(`PgFixtureServer`의 메서드, `ResponsePlan`·`CreateOutcome`·`PgOperation`·`FixtureState`와 하위 record)는 이름과 의미를 유지한다. 그래서 기존 테스트의 변경은 import 정리 수준으로 제한하고 기대값은 바꾸지 않는다. 단 거래 상태 enum은 PG main의 `com.loopers.pgsimulator.PaymentStatus`를 그대로 쓰므로 해당 import가 바뀐다.
+
+|테스트 래퍼 타입|책임|
+|---|---|
+|`PgFixtureServer`|`start()`: `PgSimulator`를 임의 포트·`ScriptedOutcomePolicy`·자동 처리 `DISABLED`로 시작하고, 그 앞에 `PgFaultProxy`를 임의 포트로 시작한다. `baseUrl()`은 **프록시 주소**다. 아래 제어 메서드를 PG 확장점(`transactions()`·`callbacks()`)과 프록시·기록 구성 요소로 구현한다|
+|`PgFaultProxy`|JDK `HttpServer`(loopback, worker 16). 요청을 PG에 그대로 전달하고 PG 응답을 끝까지 받은 뒤 plan의 reply를 적용해 commerce에 응답. 수신 기록·카운터·진행 중 요청 수·gate 상태의 출처|
+|`ScriptedOutcomePolicy`|PG main의 `OutcomePolicy` 구현. orderId별 createOutcome FIFO에서 하나를 꺼내 PG의 `CreateOutcome`으로 바꾼다: 테스트 plan의 PENDING → `PENDING_THEN_SUCCESS`, SUCCESS → `IMMEDIATE_SUCCESS`, REJECT_BEFORE_CREATE → `REJECT_BEFORE_CREATE`. 비어 있으면 PENDING과 같다. 자동 처리가 꺼져 있으므로 `PENDING_THEN_SUCCESS`여도 상태는 PENDING에 머문다|
+|`ScenarioRegistry`|operation+target별 reply FIFO. 프록시가 원자적으로 하나 소비. 비어 있으면 NORMAL|
+|`GateRegistry`·`RequestJournal`·`CallbackJournal`|5주차와 같은 역할. 프록시와 래퍼만 쓴다|
+|`LifecycleGuard`|프록시 요청 접수·콜백 작업 접수와 reset·close를 직렬화. 5주차보다 범위가 좁다(PG 내부 수명은 `PgSimulator.close()`가 맡음)|
+
+**plan의 분리와 소비 정렬:** `enqueuePlan(CREATE, orderId, plan)`은 plan 하나를 createOutcome(→ `ScriptedOutcomePolicy`의 FIFO)과 reply(→ `ScenarioRegistry`의 FIFO)로 나눠 같은 순서로 넣는다. 조회 plan은 reply만 넣는다. 두 FIFO는 다음 규칙으로 함께 한 칸씩 소비되므로 어긋나지 않는다.
+
+- PG는 헤더·입력 검증을 통과한 생성 요청에서만 정책을 호출한다(createOutcome 소비). 검증 실패는 400이며 정책을 호출하지 않는다.
+- 프록시는 PG 응답이 **400이 아닐 때만** reply를 소비한다. PG가 400을 내는 경우는 헤더·입력 검증 실패뿐이다. 그래서 5주차의 "헤더·입력 거절은 plan을 소비하지 않는 400" 의미가 유지된다.
+- PG 500(예상 밖 예외)은 PG 코드 결함이다. 프록시는 reply를 소비하고 500을 그대로 전달하며, 그 테스트는 실패로 다룬다. 정렬이 어긋날 수 있으나 이미 실패한 실행이다.
+- **한계(2026-10-25 사용자 수용):** 같은 orderId에 plan이 2개 이상 등록된 상태에서 생성 요청이 동시에 들어오면 두 FIFO의 짝이 요청별로 엇갈릴 수 있다. PG는 요청을 처리할 때 createOutcome을, 프록시는 PG 응답을 받은 뒤 reply를 꺼내므로 두 시점의 순서가 다를 수 있기 때문이다. 예를 들어 [즉시 SUCCESS+DELAY, PENDING+NORMAL]을 등록했는데 요청 A가 PG에서 먼저 처리되고 요청 B의 응답이 프록시에 먼저 돌아오면, A는 즉시 SUCCESS+NORMAL, B는 PENDING+DELAY를 받는다. 5주차 fixture는 plan 하나를 한 번에 꺼냈으므로 이 엇갈림이 없었다. **plan을 둘로 나눠 새로 생긴 제약이다.**
+  - **통제:** 이런 조합이 필요한 테스트는 앞 요청이 끝난 뒤 다음 요청을 보내거나, gate로 앞 요청의 응답을 붙잡아 실제 수신 순서를 강제한다. 같은 orderId에 plan을 하나만 등록하는 테스트는 영향이 없다.
+  - **실제로 드문 이유:** commerce는 같은 주문의 PG 생성 POST를 한 번만 보낸다(동시 confirm도 발송 권한을 얻은 실행 하나만 보냄, 4.3). 같은 orderId로 생성을 여러 번 보내는 경우는 테스트가 commerce를 거치지 않고 직접 보내는 복수 거래 준비뿐이며 순차 전송이다. 기존 테스트에 이 조합이 실제로 없는지는 R3에서 확인한다(미확인).
+  - **고르지 않은 대안:** 프록시가 plan을 통째로 꺼내 createOutcome을 요청 헤더로 PG에 넘기면 엇갈림이 없다. 대신 PG main이 테스트가 붙인 헤더를 읽는 코드를 갖게 되어, main에 테스트 조작을 넣지 않는다는 결정([A.33](./appendix-decisions.md#a33-pg-단독-실행-앱으로의-전환))과 부딪힌다. 위 조합이 드물다는 판단으로 main을 깨끗하게 두는 쪽을 택했다. R3에서 이 조합이 필요한 테스트가 여럿 나오면 재검토한다.
+
+```text
+PgFaultProxy.handle(exchange):
+  lifecycle.tryEnterRequest() 실패(종료 중) → 응답 없이 닫음
+  경로·메서드 분류 → 계약 밖이면 PG에 전달만 하고 기록하지 않음
+  journal.begin(operation)  // createReceived 등 카운터의 출처
+  요청 본문 읽기(상한 16KB). CREATE면 본문 JSON의 orderId를 target으로 기록(해석 불가면 null)
+  PG에 같은 메서드·경로·query·헤더(X-USER-ID 포함)·본문으로 전달, 응답 전체 수신
+    PG 연결 실패 → 502로 응답하고 journal에 기록 (테스트 장치 오류)
+  PG 응답 400 → 그대로 전달, plan 소비 없음
+  그 외 → plan = scenarios.poll(operation, target) 또는 NORMAL
+    CREATE 응답이면 transactionKey를 journal에 기록
+    NORMAL → PG 응답 전달
+    RAW → plan의 상태·본문·헤더로 응답 (PG 응답은 버림)
+    DELAY → delayMs 대기(종료 시 중단) 뒤 PG 응답 전달
+    GATE → gate 해제까지 최대 10초 대기. 시간 초과·종료 중이면 응답 없이 닫고 실패 기록
+    CLOSE_EARLY → 전체보다 긴 Content-Length를 선언하고 본문 절반만 보낸 뒤 연결 종료
+  journal.complete(응답 코드 또는 실패 종류); lifecycle.exitRequest()
+```
+
+PG가 거래를 저장한 뒤 응답하고 프록시는 그 뒤에 응답을 제어하므로, "거래 효과를 먼저 만들고 응답을 지연·손상한다"는 5주차 순서가 그대로 성립한다. 조회도 PG가 snapshot을 응답한 뒤 프록시가 대기하므로 GATE 중 상태가 바뀌어도 응답 내용은 대기 전 snapshot이다.
+
 ### fixture 제어 메서드와 거래 저장의 분리
 
-테스트 준비/관측은 PgFixtureServer handle의 메서드로 수행한다. 별도 제어 HTTP endpoint·JSON 요청/응답·HTTP 400/404/409 규격은 만들지 않는다. 실제 PG 결제 생성/조회 세 HTTP와 PG → 커머스 콜백 HTTP는 유지한다. fixture는 커머스 DB/Entity를 직접 변경하지 않는다.
+테스트 준비/관측은 PgFixtureServer handle의 메서드로 수행한다(구현은 위 테스트 래퍼). 별도 제어 HTTP endpoint·JSON 요청/응답·HTTP 400/404/409 규격은 만들지 않는다. 실제 PG 결제 생성/조회 세 HTTP와 PG → 커머스 콜백 HTTP는 유지한다. fixture는 커머스 DB/Entity를 직접 변경하지 않는다.
 
 |fixture 메서드|입력/출력·효과|
 |---|---|
@@ -534,11 +588,13 @@ PG 구현에 필요한 정책은 아래 기준 절에 작성했다. 아래 항�
 |releaseGate(gateId)|등록 gate 해제. 반복 해제는 성공, 없는 gate는 잘못된 테스트 준비로 거절. 거래·plan·카운터 변경 없음|
 |reset()|조용한 fixture의 거래·plan·journal/count·gate 초기화. 진행 중 결제 handler/콜백 job이 있으면 IllegalStateException, 기존 상태 유지. 새 fixture 사용을 기본으로 하며 재시작 테스트의 중간에는 reset 금지|
 
+**구현 위치(2026-10-25 목표):** state()의 transactions는 `PgSimulator.transactions().findAll()`, counts·journal·activeRequests·gates는 프록시, callbackSent·activeCallbackJobs는 래퍼의 콜백 기록에서 읽는다. setStatus는 `transactions().setStatus`, enqueuePlan은 위 두 FIFO, sendCallbacks는 count번의 `callbacks().send(snapshot)`을 모아 CallbackBatchResult로 만든다. releaseGate는 프록시의 gate, reset은 래퍼의 두 FIFO·journal·gate와 `transactions().clear()`를 초기화한다.
+
 잘못된 enum/형식/범위·없는 거래/gate·잘못된 plan 조합은 IllegalArgumentException으로 테스트 준비를 실패시킨다. close 이후 새 제어/콜백 접수는 IllegalStateException으로 거절한다. 메서드 제어 오류를 PG HTTP 응답이나 커머스 업무 오류로 전달하지 않는다.
 
 **역할·동시성:** 거래 저장·plan FIFO·관측 journal은 역할을 분리하고 각 변경/스냅샷은 동기화한다. reset의 busy 검사/전체 초기화와 새 handler/콜백 job 접수는 같은 lifecycle guard로 직렬화해 검사 직후 새 작업이 끼어들지 못하게 한다. 네트워크 대기·gate·콜백 응답 대기 중 store/registry/lifecycle 잠금을 유지하지 않는다. 병렬 테스트는 별도 fixture/임의 포트/거래/회로를 사용한다. 같은 대상의 경쟁 테스트에서 plan 적용 순서가 중요하면 gate/장벽으로 실제 수신 순서를 통제한다.
 
-**관측 의미:** createReceived/각 lookupReceived는 해당 PG endpoint의 실제 수신 시 증가하고, 입력 검증 실패/응답 유실도 수신 사실은 남긴다. 거래 수는 실제 store 생성 결과이며 수신 횟수와 다르다. 회로 거절·풀 획득 실패는 PG 수신 0일 수 있다. callbackSent는 실제 알림 전송 시도 수이고 CallbackBatchResult의 HTTP 응답/통신 오류는 전송 결과다. count=2는 의도적 중복 알림 2회이며 실패 후 retry가 아니다. 준비/관측 메서드 호출은 PG HTTP 수신·콜백 전송·회로 표본에 포함하지 않는다. 콜백 HTTP 200도 그 자체로 PG 결제 성공의 증거는 아니다. 진행 중 state() 관측만으로 업무 완료를 단정하지 않고 관련 HTTP/콜백 작업 완료 뒤 새 커머스 API/DB 조회로 최종 결과를 확인한다.
+**관측 의미:** createReceived/각 lookupReceived는 해당 PG endpoint의 실제 수신 시 증가하고, 입력 검증 실패/응답 유실도 수신 사실은 남긴다. 2026-10-25 목표 구조에서는 프록시가 수신 시점에 세고, 계약 경로의 모든 요청을 PG에 전달한 뒤에 응답을 제어하므로 프록시 수신 수와 PG 수신 수가 같다. 이 등식은 테스트가 PG에 보내는 모든 요청이 `baseUrl()`(프록시)을 거칠 때만 성립한다. 테스트는 PG 주소로 직접 요청하지 않는다. 거래 수는 실제 store 생성 결과이며 수신 횟수와 다르다. 회로 거절·풀 획득 실패는 PG 수신 0일 수 있다. callbackSent는 실제 알림 전송 시도 수이고 CallbackBatchResult의 HTTP 응답/통신 오류는 전송 결과다. count=2는 의도적 중복 알림 2회이며 실패 후 retry가 아니다. 준비/관측 메서드 호출은 PG HTTP 수신·콜백 전송·회로 표본에 포함하지 않는다. 콜백 HTTP 200도 그 자체로 PG 결제 성공의 증거는 아니다. 진행 중 state() 관측만으로 업무 완료를 단정하지 않고 관련 HTTP/콜백 작업 완료 뒤 새 커머스 API/DB 조회로 최종 결과를 확인한다.
 
 **콜백 전송 결과와 검증 완료:** 콜백 송신 timeout 자체는 별도 실험·필수 시나리오로 두지 않는다. 실습의 timeout·회복 검증 대상은 커머스 → PG HTTP이며, 아래는 테스트 장치의 최소 완료 계약이다.
 
@@ -559,7 +615,7 @@ PG 구현에 필요한 정책은 아래 기준 절에 작성했다. 아래 항�
 |gateId|GATE에서 필요한 비어 있지 않은 문자열. snapshot/CREATE 효과 이후 응답 전 대기. 최대 10초 안에 release가 없으면 서버가 응답을 종료하고 timeout을 journal에 기록|
 |httpStatus·body·headers|RAW에서 필수 상태코드/문자열 본문과 선택 header map. HTTP/JSON 손상·외부 식별/금액·혼합 목록·redirect 응답을 저장소 수정 없이 재현|
 
-RAW가 아닌 plan에 RAW 필드를 주거나 CREATE 외에 createOutcome을 주는 등 잘못된 조합은 enqueuePlan에서 IllegalArgumentException으로 거절한다. REJECT_BEFORE_CREATE는 reply=NORMAL만 허용해 확정 무효과 계약을 모호하게 만들지 않는다. plan 소비 뒤 실제 snapshot·거래 효과를 먼저 만들고 응답을 제어하므로 CREATE DELAY/닫힘 뒤에는 이미 거래가 존재한다. CLOSE_EARLY는 전체보다 긴 Content-Length를 선언한 뒤 일부 바이트만 전송하고 연결을 닫아 수신 도중 I/O 오류를 재현한다. 클라이언트가 parser 오류로 관찰할 가능성도 있으므로 해당 검증에서는 실제 예외 원인/카운터를 함께 확인한다. 연결 수립 자체의 실패와는 별도다.
+RAW가 아닌 plan에 RAW 필드를 주거나 CREATE 외에 createOutcome을 주는 등 잘못된 조합은 enqueuePlan에서 IllegalArgumentException으로 거절한다. REJECT_BEFORE_CREATE는 reply=NORMAL만 허용해 확정 무효과 계약을 모호하게 만들지 않는다. plan 소비 뒤 실제 snapshot·거래 효과를 먼저 만들고 응답을 제어하므로 CREATE DELAY/닫힘 뒤에는 이미 거래가 존재한다(2026-10-25 목표 구조에서는 PG가 거래를 저장·응답한 뒤 프록시가 reply를 적용해 같은 순서가 된다. createOutcome은 PG의 `ScriptedOutcomePolicy`가, reply는 프록시가 소비한다). CLOSE_EARLY는 전체보다 긴 Content-Length를 선언한 뒤 일부 바이트만 전송하고 연결을 닫아 수신 도중 I/O 오류를 재현한다. 클라이언트가 parser 오류로 관찰할 가능성도 있으므로 해당 검증에서는 실제 예외 원인/카운터를 함께 확인한다. 연결 수립 자체의 실패와는 별도다.
 
 아래 JSON은 typed plan의 설정값 표현 예시이며 제어 HTTP 요청 본문이 아니다.
 
@@ -569,7 +625,7 @@ RAW가 아닌 plan에 RAW 필드를 주거나 CREATE 외에 createOutcome을 주
 
 위 CREATE plan은 거래를 만든 뒤 응답만 지연한다. commerce는 1초 읽기 제한으로 UNKNOWN/예약 유지할 수 있으며, PG state에는 거래가 남는다. 그 거래를 status=SUCCESS로 변경한 뒤 commerce의 고객 reconcile을 호출하면 기존 거래를 조회해 TX B에 반영한다. 대사 시 PG create 카운터는 늘지 않아야 한다.
 
-콜백 유실은 **상태만 바꾸고 sendCallbacks를 호출하지 않는 것**으로, 중복은 count로, 늦은/역순 알림의 HTTP 수신 순서는 전송 시점으로 제어한다. 늦은 생성/조회 관찰의 적용 순서와 종결 보호는 HTTP GATE·읽기 대기에 묶지 않고 [4.5의 업무 TX 경계 검증](./04-use-cases.md#업무-관찰-순서의-tx-경계-검증)에서 입증한다. 콜백 본문 status가 도착 순서와 달라도 commerce는 권위 조회로 판단한다. 정상 PG 저장소 자체를 잘못된 금액/다른 주문으로 바꾸기보다 RAW 응답으로 조회 계약 위반을 재현한다. 복수 거래는 동일 orderId로 직접 PG POST를 두 번 보내 만들 수 있고 commerce의 생성 멱등성 검증과 구분한다.
+콜백 유실은 **상태만 바꾸고 sendCallbacks를 호출하지 않는 것**으로, 중복은 count로, 늦은/역순 알림의 HTTP 수신 순서는 전송 시점으로 제어한다. 늦은 생성/조회 관찰의 적용 순서와 종결 보호는 HTTP GATE·읽기 대기에 묶지 않고 [4.5의 업무 TX 경계 검증](./04-use-cases.md#업무-관찰-순서의-tx-경계-검증)에서 입증한다. 콜백 본문 status가 도착 순서와 달라도 commerce는 권위 조회로 판단한다. 정상 PG 저장소 자체를 잘못된 금액/다른 주문으로 바꾸기보다 RAW 응답으로 조회 계약 위반을 재현한다. 복수 거래는 테스트가 commerce를 거치지 않고 `baseUrl()`로 동일 orderId의 PG POST를 두 번 보내 만들 수 있고 commerce의 생성 멱등성 검증과 구분한다.
 
 plan target은 서버 저장/요청과 같은 문자열 식별자로 직접 전달한다. PG 조회 URI는 adapter가 인코딩하고 Java 제어에는 URI 변환을 추가하지 않는다. reset 없이 시나리오를 시작할 때는 테스트별 고유 주문/거래와 plan을 사용한다. 서버가 콜백을 보낼 수 있는 URL은 `http`·`127.0.0.1`·명시 포트·`/api/v1/payments/callback`으로 제한하고 redirect를 따르지 않는다. 임의 외부 주소를 fixture 제어로 주입하지 않는다.
 
@@ -585,9 +641,9 @@ plan target은 서버 저장/요청과 같은 문자열 식별자로 직접 전�
 
 ### 테스트 시작·초기화·상태 보존
 
-아래는 구현할 테스트 수명 계약이다. 별도 PG 프로세스/main·Gradle run task·pg-demo 프로필·데모 DB/기동 명령은 만들지 않는다. 현재 문서 변경으로 코드/DB를 생성하거나 초기화하지 않았다.
+아래는 구현할 테스트 수명 계약이다. 테스트는 별도 PG 프로세스나 수동 실행 중인 PG 앱에 의존하지 않고, 같은 JVM 안에서 PG와 프록시를 시작한다. 수동 실행용 main·`bootRun`은 [2.10](./02-architecture.md#210-pg-시뮬레이터-앱의-책임과-수명)에 있으나 테스트 조건이 아니다. pg-demo 프로필·데모 DB는 만들지 않는다. 현재 문서 변경으로 코드/DB를 생성하거나 초기화하지 않았다.
 
-- 일반 테스트는 PgFixtureServer.start()로 loopback 임의 포트 서버를 먼저 시작하고 실제 URL을 commerce.pg.base-url에 주입한다. 이 PG 포트를 커머스 포트와 혼동하지 않는다. 문서 2.9 YAML의 URL은 형식 예시이며 테스트는 여러 테스트가 공유하는 고정 포트/평소 켜둔 서버에 의존하지 않는다. 테스트별 포트·fixture 격리를 유지한다.
+- 일반 테스트는 PgFixtureServer.start()로 loopback 임의 포트 서버(목표 구조에서는 PG와 프록시)를 먼저 시작하고 `baseUrl()`(목표 구조에서는 프록시 주소)을 commerce.pg.base-url에 주입한다. 이 PG 포트를 커머스 포트와 혼동하지 않는다. 문서 2.9 YAML의 URL은 형식 예시이며 테스트는 여러 테스트가 공유하는 고정 포트/평소 켜둔 서버에 의존하지 않는다. 테스트별 포트·fixture 격리를 유지한다.
 - **콜백 HTTP 테스트의 커머스 포트·callback URL:** 커머스 기동 전에 테스트가 사용할 빈 포트를 선택한다. 그 값을 `server.port`와 `commerce.pg.callback-url`(`http://127.0.0.1:{선택 포트}/api/v1/payments/callback`)에 함께 주입한 뒤 컨텍스트를 기동한다. `server.port=0`으로 기동한 뒤 포트를 알아내 callback URL을 바꾸는 방식은 쓰지 않으며 PgHttpProperties의 불변 바인딩을 유지한다. 기동 완료 후 웹 서버의 실제 수신 포트와 주입한 callback URL의 포트·주소·경로가 일치하는지 확인한 뒤에만 confirm·콜백 검증을 시작한다.
 - 빈 포트의 사전 선택은 포트 예약이 아니다. 선택 뒤 다른 프로세스가 점유해 bind에 실패하거나 기동 후 포트/URL이 불일치하면 해당 실행은 테스트 준비 실패로 기록하며 검증 통과로 세지 않는다. 별도 포트 예약 장치나 자동 재시도 정책은 두지 않는다.
 - YAML 속성 비교는 테스트별 초기 상태·설정·요청열을 통제한다. 실제 Boot registry/adapter에 적용된 최종값과 회로 상태/표본·PG 수신/거래 수를 기록한다. 회로 순수 전이는 주입 clock으로 보완하고 HTTP timeout/상태 타이머의 실제 동작은 실제 시간으로 확인한다. 구체 글 실험값/결과는 구현 뒤 정한다.
