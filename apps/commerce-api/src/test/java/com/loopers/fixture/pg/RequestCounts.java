@@ -8,11 +8,11 @@ import java.util.List;
  */
 public record RequestCounts(long createReceived, long lookupByKeyReceived, long lookupByOrderReceived, long callbackSent) {
 
-    /** journal 과 같은 snapshot 에서 계산해 둘이 어긋나지 않게 한다. */
-    static RequestCounts from(List<JournalEntry> journal, List<CallbackRecord> callbacks) {
+    /** 수신 횟수는 journal 과 같은 snapshot 에서 계산해 둘이 어긋나지 않게 한다. */
+    static RequestCounts from(List<JournalEntry> journal, long callbackSent) {
         return new RequestCounts(
             count(journal, PgOperation.CREATE), count(journal, PgOperation.LOOKUP_TRANSACTION),
-            count(journal, PgOperation.LOOKUP_ORDER), callbacks.size());
+            count(journal, PgOperation.LOOKUP_ORDER), callbackSent);
     }
 
     private static long count(List<JournalEntry> journal, PgOperation operation) {

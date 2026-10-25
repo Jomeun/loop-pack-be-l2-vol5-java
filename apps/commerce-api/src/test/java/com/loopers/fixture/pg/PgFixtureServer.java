@@ -8,12 +8,12 @@ import com.loopers.pgsimulator.Settlement;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 테스트용 PG handle(설계 5.7). pg-simulator 를 임의 포트·등록 결과·자동 처리 없음으로 띄우고 그 앞에 장애 주입 프록시를 둔다.
@@ -21,8 +21,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 생성·setStatus 는 콜백을 자동으로 보내지 않는다. 콜백은 {@link #sendCallbacks} 로만 보낸다.
  */
 public final class PgFixtureServer implements AutoCloseable {
-
-    static final int HTTP_WORKERS = PgFaultProxy.HTTP_WORKERS;
 
     private static final Duration TERMINATION_TIMEOUT = Duration.ofSeconds(5);
     private static final AtomicInteger SERVER_SEQUENCE = new AtomicInteger();
@@ -34,19 +32,19 @@ public final class PgFixtureServer implements AutoCloseable {
     private final ScenarioRegistry scenarios;
     private final GateRegistry gates;
     private final RequestJournal journal;
-    private final CallbackJournal callbackJournal;
     private final LifecycleGuard lifecycle;
+    /** 결과가 나온 알림 중 실제로 보낸(sent=true) 수. 진행 중 전송은 아직 세지 않는다(5.7). */
+    private final AtomicLong callbackSent = new AtomicLong();
 
     private PgFixtureServer(PgSimulator pg, PgFaultProxy proxy, ScriptedOutcomePolicy outcomes,
                             ScenarioRegistry scenarios, GateRegistry gates, RequestJournal journal,
-                            CallbackJournal callbackJournal, LifecycleGuard lifecycle) {
+                            LifecycleGuard lifecycle) {
         this.pg = pg;
         this.proxy = proxy;
         this.outcomes = outcomes;
         this.scenarios = scenarios;
         this.gates = gates;
         this.journal = journal;
-        this.callbackJournal = callbackJournal;
         this.lifecycle = lifecycle;
     }
 
@@ -56,7 +54,6 @@ public final class PgFixtureServer implements AutoCloseable {
         ScenarioRegistry scenarios = new ScenarioRegistry();
         GateRegistry gates = new GateRegistry();
         RequestJournal journal = new RequestJournal(Clock.systemUTC());
-        CallbackJournal callbackJournal = new CallbackJournal(Clock.systemUTC());
         LifecycleGuard lifecycle = new LifecycleGuard();
         PgSimulator pg = PgSimulator.start(new PgSimulatorOptions(0, outcomes, Settlement.DISABLED));
         PgFaultProxy proxy;
@@ -66,7 +63,7 @@ public final class PgFixtureServer implements AutoCloseable {
             pg.close();
             throw e;
         }
-        return new PgFixtureServer(pg, proxy, outcomes, scenarios, gates, journal, callbackJournal, lifecycle);
+        return new PgFixtureServer(pg, proxy, outcomes, scenarios, gates, journal, lifecycle);
     }
 
     /** 장애 주입 프록시 주소. commerce.pg.base-url 에 주입한다. */
@@ -77,17 +74,15 @@ public final class PgFixtureServer implements AutoCloseable {
     public FixtureState state() {
         return lifecycle.whileOpen(() -> {
             List<JournalEntry> entries = journal.snapshot();
-            List<CallbackRecord> callbackRecords = callbackJournal.snapshot();
             return new FixtureState(
                 pg.transactions().findAll().stream()
                     .map(transaction -> new TransactionSnapshot(transaction.transactionKey(), transaction.orderId(),
                         transaction.amount(), transaction.status()))
                     .toList(),
-                RequestCounts.from(entries, callbackRecords),
+                RequestCounts.from(entries, callbackSent.get()),
                 entries,
                 lifecycle.activeRequests(),
                 gates.snapshot(),
-                callbackRecords,
                 lifecycle.activeCallbackJobs());
         });
     }
@@ -140,11 +135,10 @@ public final class PgFixtureServer implements AutoCloseable {
             List<CompletableFuture<CallbackDelivery>> deliveries = new ArrayList<>();
             for (int attempt = 1; attempt <= count; attempt++) {
                 int number = attempt;
-                Instant submittedAt = callbackJournal.now();
-                // 기록·접수 해제를 결과 완료보다 먼저 해서, batch 완료를 본 테스트가 곧바로 조용한 상태를 보게 한다.
+                // 집계·접수 해제를 결과 완료보다 먼저 해서, batch 완료를 본 테스트가 곧바로 조용한 상태를 보게 한다.
                 deliveries.add(pg.callbacks().send(snapshot).thenApply(result -> {
                     if (result.sent()) {
-                        callbackJournal.record(snapshot, submittedAt, result.httpStatus(), result.failure());
+                        callbackSent.incrementAndGet();
                     }
                     lifecycle.exitCallbackJob();
                     return toDelivery(number, result);
@@ -173,7 +167,7 @@ public final class PgFixtureServer implements AutoCloseable {
             scenarios.clear();
             journal.clear();
             gates.clear();
-            callbackJournal.clear();
+            callbackSent.set(0);
         });
     }
 
@@ -220,6 +214,6 @@ public final class PgFixtureServer implements AutoCloseable {
     }
 
     private static CallbackDelivery toDelivery(int attempt, CallbackResult result) {
-        return new CallbackDelivery(attempt, result.sent(), result.httpStatus(), result.failure(), result.errorDetail());
+        return new CallbackDelivery(attempt, result.sent(), result.httpStatus(), result.failure());
     }
 }
