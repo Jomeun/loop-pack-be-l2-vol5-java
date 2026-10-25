@@ -1,59 +1,42 @@
 package com.loopers.fixture.pg;
 
+import com.loopers.pgsimulator.CallbackFailure;
+import com.loopers.pgsimulator.TransactionSnapshot;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 실제 전송을 시작한 알림만 기록한다. 그래서 entry 수가 callbackSent 이고 접수·대기 중 작업과 구분된다. */
+/**
+ * 실제로 보낸(sent=true) 알림을 전송 결과가 나온 뒤 기록한다. 그래서 entry 수가 callbackSent 이며, 진행 중인 전송은
+ * 아직 세지 않는다(2026-10-25 사용자 결정, 5.7). 전송은 PG 의 콜백 전송기가 하므로 시작 시각 대신 제출 시각을 남긴다.
+ */
 final class CallbackJournal {
 
     private final Clock clock;
-    private final List<Entry> entries = new ArrayList<>();
+    private final List<CallbackRecord> records = new ArrayList<>();
     private long nextSequence = 1;
 
     CallbackJournal(Clock clock) {
         this.clock = clock;
     }
 
-    synchronized Entry begin(TransactionSnapshot snapshot) {
-        Entry entry = new Entry(nextSequence++, snapshot, clock.instant());
-        entries.add(entry);
-        return entry;
+    Instant now() {
+        return clock.instant();
     }
 
-    synchronized void complete(Entry entry, Integer httpStatus, CallbackFailure failure) {
-        entry.completedAt = clock.instant();
-        entry.httpStatus = httpStatus;
-        entry.failure = failure;
+    synchronized void record(TransactionSnapshot snapshot, Instant submittedAt, Integer httpStatus,
+                             CallbackFailure failure) {
+        records.add(new CallbackRecord(nextSequence++, snapshot.transactionKey(), snapshot.orderId(), snapshot.status(),
+            submittedAt, clock.instant(), httpStatus, failure));
     }
 
     synchronized List<CallbackRecord> snapshot() {
-        return entries.stream().map(Entry::toRecord).toList();
+        return List.copyOf(records);
     }
 
     synchronized void clear() {
-        entries.clear();
-    }
-
-    static final class Entry {
-
-        private final long sequence;
-        private final TransactionSnapshot snapshot;
-        private final Instant startedAt;
-        private Instant completedAt;
-        private Integer httpStatus;
-        private CallbackFailure failure;
-
-        private Entry(long sequence, TransactionSnapshot snapshot, Instant startedAt) {
-            this.sequence = sequence;
-            this.snapshot = snapshot;
-            this.startedAt = startedAt;
-        }
-
-        private CallbackRecord toRecord() {
-            return new CallbackRecord(sequence, snapshot.transactionKey(), snapshot.orderId(), snapshot.status(),
-                startedAt, completedAt, httpStatus, failure);
-        }
+        records.clear();
     }
 }

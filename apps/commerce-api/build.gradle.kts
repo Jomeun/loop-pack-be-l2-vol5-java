@@ -28,6 +28,9 @@ dependencies {
     testImplementation(testFixtures(project(":modules:jpa")))
     testImplementation(testFixtures(project(":modules:redis")))
 
+    // 로컬 PG 앱 (설계 2.10). 테스트가 같은 JVM 에서 시작한다
+    testImplementation(project(":apps:pg-simulator"))
+
     // ArchUnit
     testImplementation("com.tngtech.archunit:archunit:1.5.0")
 }

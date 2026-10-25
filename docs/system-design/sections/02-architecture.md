@@ -523,7 +523,7 @@ pgLookup.ignoreException(error):
 
 ### 테스트와 수동 실행에서 사용하는 PG
 
-PG는 별도 모듈 `apps/pg-simulator`의 단독 실행 앱이다(2026-10-25 목표 설계, 미구현. R3 전까지 실제 코드는 commerce-api 테스트 소스의 fixture다). 수동 실행에서는 고정 포트로 띄워 commerce-api의 기본 base URL로 호출하고, 테스트에서는 같은 코드를 임의 포트로 시작한다. commerce의 JPA·주문 로직에 의존하지 않는다. 고객 결제 API의 요청·응답은 [로컬 PG HTTP 계약](./05-api-contract.md#55-로컬-pg-http-계약)을, 앱 구성·실행·수명은 [2.10](#210-pg-시뮬레이터-앱의-책임과-수명)을 따른다.
+PG는 별도 모듈 `apps/pg-simulator`의 단독 실행 앱이다(2026-10-25 전환·검증 완료). 수동 실행에서는 고정 포트로 띄워 commerce-api의 기본 base URL로 호출하고, 테스트에서는 같은 코드를 임의 포트로 시작한다. commerce의 JPA·주문 로직에 의존하지 않는다. 고객 결제 API의 요청·응답은 [로컬 PG HTTP 계약](./05-api-contract.md#55-로컬-pg-http-계약)을, 앱 구성·실행·수명은 [2.10](#210-pg-시뮬레이터-앱의-책임과-수명)을 따른다.
 
 테스트는 PG와 그 앞의 장애 주입 프록시를 loopback 임의 포트에 시작하고 프록시 주소를 base URL로 adapter에 주입한다. 이 PG 포트는 커머스의 콜백 수신 포트와 별개이며, 커머스 포트와 callback URL은 기동 전 선택·동시 주입하는 [5.7](./05-api-contract.md#57-테스트-pg-제어와-상태-보존) 절차를 따른다. 테스트가 만든 거래·시나리오만 사용하며 종료 시 HTTP 서버·worker·client를 정리한다. 즉시 SUCCESS·콜백·생성/조회 회로·실제 timeout/풀·재시작 검증은 유지한다.
 
@@ -683,7 +683,7 @@ create(request):                 // retry 없음, DB 처리 포함 금지
 
 ## 2.10 PG 시뮬레이터 앱의 책임과 수명
 
-**상태:** 2026-10-25 사용자가 방향과 주요 결정을 승인했고, 이 절의 상세 내용은 사용자 검토 대기다. **미구현**이다. R3 전환 전까지 실제 코드는 5주차 테스트 fixture(`apps/commerce-api/src/test/java/com/loopers/fixture/pg`)이며, 그 계약은 이 절의 이전 판(커밋 `7cffe2d` 시점)이 기준이다. 결정의 문제·대안·비용은 [A.33](./appendix-decisions.md#a33-pg-단독-실행-앱으로의-전환)에 둔다.
+**상태:** 2026-10-25 사용자 검토를 마친 설계다(2f62a88). 같은 날 R1(PG 모듈)·R2(테스트 래퍼·프록시로 기존 fixture 교체)를 구현하고 R3(전체 회귀)·R4(수동 실행)·R5(최종 회귀)로 확인했다. 실행 근거는 4.5의 전환 검증 소절에 둔다. 5주차 테스트 fixture의 계약은 이 절의 이전 판(커밋 `7cffe2d` 시점)에 있다. 결정의 문제·대안·비용은 [A.33](./appendix-decisions.md#a33-pg-단독-실행-앱으로의-전환)에 둔다.
 
 **선택·근거:** 새 모듈 `apps/pg-simulator`에 JDK 21 `HttpServer` 기반 PG 앱을 둔다. 같은 코드를 두 방식으로 쓴다.
 
@@ -705,7 +705,7 @@ PG는 commerce의 domain/JPA를 참조하지 않는다. commerce-api main 코드
 |`com.loopers.pgsimulator` 타입|공개 여부|책임|
 |---|---|---|
 |`PgSimulator`|public|`start(PgSimulatorOptions)` → AutoCloseable handle. `baseUrl()`, `transactions()`(저장소 접근), `callbacks()`(콜백 전송기), `close()`. 테스트 래퍼가 쓰는 확장점은 이 세 접근자와 옵션의 결과 정책이 전부다|
-|`PgSimulatorOptions`|public|`port`(0이면 임의 포트), `outcomePolicy`, `settlement`(`DISABLED` 또는 `after(delay)`). 주소는 항상 `127.0.0.1`|
+|`PgSimulatorOptions`·`Settlement`|public record|`port`(0이면 임의 포트), `outcomePolicy`, `settlement`(`Settlement.DISABLED` 또는 `Settlement.after(delay)`, 음수 지연 거절). 주소는 항상 `127.0.0.1`|
 |`OutcomePolicy`|public 인터페이스(확장점)|`CreateOutcome decide(CreateAttempt attempt)`. `CreateAttempt`는 검증을 통과한 생성 요청의 `orderId`·`amount`만 담는다. 카드 값은 넘기지 않는다|
 |`CreateOutcome`|public enum|`PENDING_THEN_SUCCESS`, `PENDING_THEN_FAILED`, `IMMEDIATE_SUCCESS`, `REJECT_BEFORE_CREATE`. 앞의 둘은 생성 응답이 202 PENDING이고 자동 처리가 켜져 있을 때만 뒤의 결과로 바뀐다|
 |`AmountModuloOutcomePolicy`|public|수동 실행 기본 정책. 아래 금액 규칙|
@@ -715,7 +715,7 @@ PG는 commerce의 domain/JPA를 참조하지 않는다. commerce-api main 코드
 |`PaymentHttpHandler`|패키지 내부|세 API의 헤더·입력 검증, 정책 호출, 거래 저장, 자동 처리 예약, 응답|
 |`AutoSettlement`|패키지 내부|자동 처리. 단일 스케줄러 스레드로 지연 뒤 상태 결정과 콜백 1회 전송|
 |`CallbackSender`|public(확장점)|`CompletableFuture<CallbackResult> send(TransactionSnapshot)`. 저장된 callbackUrl로 알림 1회. 전용 worker 2개·전용 Apache client(연결 300ms·응답 1초·풀 2·풀 대기 200ms, 자동 retry·redirect 끔). 상태를 바꾸지 않고 재전송하지 않는다|
-|`CallbackResult`|public record|HTTP 응답 코드 또는 통신 오류 종류(연결 실패·송신 timeout·I/O 오류)|
+|`CallbackResult`|public record|`sent`, `httpStatus`, `failure`(`CallbackFailure`: 연결 실패·송신 timeout·I/O 오류·종료로 중단), `errorDetail`. 응답 코드와 오류 중 하나만 있다. `sent=false`는 PG 종료로 전송을 시작하지 못한 경우이며, 종료 뒤 `send`도 예외 대신 이 결과로 완료한다|
 |`PgSimulatorApplication`|public|`main`. 실행 인자 해석, `AmountModuloOutcomePolicy`·자동 처리로 시작, 종료 hook 등록|
 
 5주차 fixture의 `ScenarioRegistry`·`GateRegistry`·`RequestJournal`·`CallbackJournal`·`LifecycleGuard`·`ResponsePlan`은 PG main으로 옮기지 않는다. 필요한 기능은 [5.7](./05-api-contract.md#57-테스트-pg-제어와-상태-보존)의 테스트 래퍼가 맡는다.
@@ -733,11 +733,11 @@ PG는 commerce의 domain/JPA를 참조하지 않는다. commerce-api main 코드
 - 무작위 결과·확률은 쓰지 않는다. 같은 금액은 항상 같은 경로로 간다.
 - **자동 처리 지연은 기본 1초이며 실행 인자로 바꿀 수 있다(0 허용).** 이유: 0이면 생성 응답 직후 콜백이 도착해 수동 실행에서 주문의 결제 대기 상태를 조회로 관찰할 틈이 거의 없다. 1초는 사람이 confirm 응답을 받고 주문을 조회해 PAYMENT_PENDING을 확인한 뒤 확정을 다시 확인할 수 있게 하려는 관찰용 값이다. **정합성을 위한 값이 아니다.** 지연이 0이어서 콜백이 commerce의 생성 결과 반영보다 먼저 도착해도, commerce는 콜백 내용을 믿지 않고 거래를 권위 조회해 같은 결과 반영 경계로 처리한다(4.3의 callback-first). 운영 PG의 실제 처리 시간을 흉내 낸 값도 아니다.
 - 즉시 SUCCESS에도 콜백을 보내는 이유는 실제 PG처럼 알림이 중복으로 와도 추가 효과가 없는지(5.5) 수동 실행에서도 볼 수 있게 하려는 것이다.
-- 자동 콜백이 실패해도(commerce가 꺼져 있는 등) 재전송하지 않고 로그만 남긴다. 회복은 commerce의 고객 reconcile이 맡는다. 이 경로는 R4 수동 확인 대상이다.
+- 자동 콜백이 실패해도(commerce가 꺼져 있는 등) 재전송하지 않고 로그만 남긴다. 회복은 commerce의 고객 reconcile이 맡는다. 이 경로는 R4 수동 실행에서 확인했다(4.5).
 
 ### 실행
 
-실행 인자 이름은 **제안**이며 R0 검토에서 바꿀 수 있다.
+실행 인자 이름은 R0 검토에서 사용자가 바꾸지 않아 그대로 구현했다.
 
 ```bash
 ./gradlew :apps:pg-simulator:bootRun --args='--port=18080 --settlement-delay-ms=1000'
@@ -746,7 +746,8 @@ PG는 commerce의 domain/JPA를 참조하지 않는다. commerce-api main 코드
 - 인자를 생략하면 포트 18080, 지연 1000ms다. 잘못된 값(음수·숫자 아님·포트 범위 밖)이면 시작하지 않고 오류를 출력한다.
 - 바인딩 주소는 `127.0.0.1` 고정이다. 외부에 공개하지 않는다.
 - 로그는 요청 종류·대상·응답 코드, 자동 처리 결과, 콜백 전송 결과만 남긴다. 카드 값과 요청 원문은 남기지 않는다.
-- `bootRun`·`bootJar`가 일반 `main` 메서드로 동작하는지는 R1에서 확인한다.
+- `bootRun`·`bootJar`가 일반 `main` 메서드로 동작함을 R1에서 확인했다. 실행 인자 이름은 제안대로 구현했다.
+- **주의(R4에서 확인):** commerce-api를 `local` 프로필로 띄우면 `ddl-auto: create` 때문에 로컬 `loopers` DB의 엔티티 테이블이 지워지고 다시 만들어진다. 기존 로컬 데이터를 보존하려면 별도 DB를 쓰거나, 스키마가 이미 맞는 DB에서는 `--spring.jpa.hibernate.ddl-auto=validate`로 다시 띄운다. 수동 실행용 프로필·DB 분리는 이번 범위가 아니다.
 
 ### 처리 순서
 

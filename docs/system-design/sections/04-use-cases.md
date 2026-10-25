@@ -1021,7 +1021,7 @@ I4 커밋 `58b5faf`와 마지막 검증 소스가 같음을 확인하고, 실제
 
 ### PG 단독 실행 앱 전환의 검증 — 2026-10-25 목표
 
-**상태:** 목표 설계이며 미실행이다. 구조는 [2.10](./02-architecture.md#210-pg-시뮬레이터-앱의-책임과-수명)·[5.7](./05-api-contract.md#57-테스트-pg-제어와-상태-보존), 결정은 [A.33](./appendix-decisions.md#a33-pg-단독-실행-앱으로의-전환)을 따른다. 위 검증 경계·시나리오의 기대값은 바꾸지 않는다.
+**상태:** 2026-10-25 R1~R4 실행 완료. R4 수동 실행에서 세 금액 경로의 최종 주문 상태·재고와 콜백 유실 뒤 재기동·reconcile 회복(PG 생성 1회)을 1회 관찰했다. R3 전체 check에서 commerce-api 831건 fail/error 0(skip 2는 환경 변수로 켜는 미커밋 실험 테스트), pg-simulator 79건 fail/error/skip 0, Checkstyle 위반 0을 확인했다. 실험 테스트 2개를 따로 켜서 실행한 결과도 교차 확인 21/21 일치로 5주차 관찰과 같았다. 구조는 [2.10](./02-architecture.md#210-pg-시뮬레이터-앱의-책임과-수명)·[5.7](./05-api-contract.md#57-테스트-pg-제어와-상태-보존), 결정은 [A.33](./appendix-decisions.md#a33-pg-단독-실행-앱으로의-전환)을 따른다. 위 검증 경계·시나리오의 기대값은 바꾸지 않는다.
 
 |단계|검증|통과 기준|
 |---|---|---|
@@ -1030,3 +1030,5 @@ I4 커밋 `58b5faf`와 마지막 검증 소스가 같음을 확인하고, 실제
 |기존 테스트 전환|PG fixture를 쓰는 commerce-api 테스트 전체|기대값·검증 내용 변경 없이 fail/error 0. import 정리 외 변경은 이유를 기록. 5주차 fixture 자체 테스트는 메서드별 이동/제거 근거를 남김|
 |수동 실행|PG 앱(18080)과 commerce-api를 함께 실행. 6000원·7000원·8000원 같은 세 금액 경로의 confirm 응답과 최종 주문 상태, commerce 중지 중 자동 콜백 유실 뒤 재기동·reconcile 회복|실제 실행 기록. 자동화 테스트 통과로 대체하지 않음|
 |전체 회귀|`check`(테스트·Checkstyle·ArchUnit)|fail/error 0, 의도한 skip만. ArchUnit이 pg-simulator 클래스를 규칙 대상으로 잡지 않음|
+
+**R5 최종 회귀(2026-10-25):** R4 이후 코드 변경 없이 `:apps:commerce-api:check :apps:pg-simulator:check :apps:pg-simulator:bootJar --rerun-tasks`를 다시 실행해 성공했다. commerce-api 831건 fail/error 0, skip 2(환경 변수로 켜는 미커밋 실험 테스트, 의도된 skip), ArchUnit 3건 포함. pg-simulator 79건 fail/error/skip 0. Checkstyle commerce-api main 157·test 119, pg-simulator main 16·test 6 파일 위반 0. bootJar와 plain jar가 함께 생성됐다.

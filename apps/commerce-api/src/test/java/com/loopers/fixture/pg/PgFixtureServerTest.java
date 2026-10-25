@@ -2,6 +2,7 @@ package com.loopers.fixture.pg;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.loopers.pgsimulator.PaymentStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -404,15 +405,12 @@ class PgFixtureServerTest {
         }
     }
 
-    @DisplayName("저장·관측 타입은 카드 정보와 요청 원문 필드를 갖지 않는다.")
+    /** 저장 타입의 필드 검사는 pg-simulator 모듈의 PgSimulatorHttpContractTest 가 맡는다. */
+    @DisplayName("관측 타입은 카드 정보·요청 원문·callbackUrl 필드를 갖지 않는다.")
     @Test
     void storesOnlyContractFields() {
-        assertAll(
-            () -> assertThat(recordComponentNames(StoredTransaction.class))
-                .containsExactly("transactionKey", "orderId", "amount", "status", "callbackUrl"),
-            () -> assertThat(recordComponentNames(TransactionSnapshot.class))
-                .containsExactly("transactionKey", "orderId", "amount", "status")
-        );
+        assertThat(recordComponentNames(TransactionSnapshot.class))
+            .containsExactly("transactionKey", "orderId", "amount", "status");
     }
 
     static Stream<Arguments> invalidCreateBodies() {

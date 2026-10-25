@@ -2,6 +2,7 @@ package com.loopers.fixture.pg;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.loopers.pgsimulator.PaymentStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -460,7 +461,7 @@ class PgFixtureControlTest {
             assertAll(
                 () -> assertThat(failure).isInstanceOf(IOException.class)
                     .isNotInstanceOf(HttpTimeoutException.class),
-                () -> assertThat(elapsed).isGreaterThanOrEqualTo(PaymentHttpHandler.GATE_TIMEOUT.minusMillis(100)),
+                () -> assertThat(elapsed).isGreaterThanOrEqualTo(PgFaultProxy.GATE_TIMEOUT.minusMillis(100)),
                 () -> assertThat(entry.failure()).isEqualTo(ResponseFailure.GATE_TIMEOUT),
                 () -> assertThat(entry.responseStatus()).isNull(),
                 () -> assertThat(state.gates()).containsExactly(new GateSnapshot("g-152", GateStatus.TIMED_OUT)),

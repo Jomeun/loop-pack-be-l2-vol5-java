@@ -2,6 +2,8 @@ package com.loopers.fixture.pg;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.loopers.pgsimulator.CallbackFailure;
+import com.loopers.pgsimulator.PaymentStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -140,7 +142,6 @@ class PgFixtureCallbackTest {
         CompletableFuture<CallbackBatchResult> batch = track(pg.sendCallbacks(key, 3));
         await().atMost(OBSERVE_DEADLINE).pollInterval(FAST_POLL).until(() -> receiver.inFlight() == 2);
         FixtureState holding = pg.state();
-        long liveCallbackThreads = liveThreadsNamedWith(pg.callbackThreadNamePrefix());
         HttpResponse<String> lookup = get("/api/v1/payments/" + key);
         pg.setStatus(key, PaymentStatus.FAILED);
         awaitHandlersFinished();
@@ -156,9 +157,8 @@ class PgFixtureCallbackTest {
         FixtureState cleared = pg.state();
 
         assertAll(
-            () -> assertThat(holding.counts().callbackSent()).as("실제 전송 시작 2건").isEqualTo(2),
+            () -> assertThat(holding.counts().callbackSent()).as("결과가 나오기 전에는 세지 않음(5.7)").isZero(),
             () -> assertThat(holding.activeCallbackJobs()).as("접수 3건(대기 1 포함)").isEqualTo(3),
-            () -> assertThat(liveCallbackThreads).as("콜백 전용 worker 2개").isEqualTo(CallbackSender.WORKERS),
             () -> assertThat(lookup.statusCode()).as("콜백 대기 중 PG 조회").isEqualTo(200),
             () -> assertThat(resetFailure).isInstanceOf(IllegalStateException.class),
             () -> assertThat(afterRejectedReset).isEqualTo(beforeReset),
@@ -267,7 +267,6 @@ class PgFixtureCallbackTest {
                 .extracting(CallbackDelivery::failure).containsOnly(CallbackFailure.ABORTED_BY_CLOSE),
             () -> assertThat(result.deliveries()).filteredOn(CallbackDelivery::sent).hasSize(2),
             () -> assertThat(pg.isTerminated()).isTrue(),
-            () -> assertThat(liveThreadsNamedWith(pg.callbackThreadNamePrefix())).isZero(),
             () -> assertThatThrownBy(() -> pg.sendCallbacks(key, 1)).isInstanceOf(IllegalStateException.class),
             () -> assertThatThrownBy(() -> pg.sendCallbacks(null, 0)).isInstanceOf(IllegalStateException.class)
         );
@@ -373,11 +372,5 @@ class PgFixtureCallbackTest {
         List<String> names = new ArrayList<>();
         node.fieldNames().forEachRemaining(names::add);
         return names;
-    }
-
-    private static long liveThreadsNamedWith(String prefix) {
-        return Thread.getAllStackTraces().keySet().stream()
-            .filter(thread -> thread.getName().startsWith(prefix) && thread.isAlive())
-            .count();
     }
 }

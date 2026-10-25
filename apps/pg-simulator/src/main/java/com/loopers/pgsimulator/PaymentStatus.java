@@ -1,4 +1,4 @@
-package com.loopers.fixture.pg;
+package com.loopers.pgsimulator;
 
 public enum PaymentStatus {
     PENDING,
