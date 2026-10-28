@@ -29,3 +29,7 @@
 ## 5.7 테스트 PG 제어와 상태 보존
 
 기준 문서: [5.7 테스트 PG 제어와 상태 보존](../features/pg-simulator/fixture-contract.md#57-테스트-pg-제어와-상태-보존).
+
+## 5.8 OrderConfirmed v1 이벤트 계약
+
+기준 문서: [5.8 OrderConfirmed v1 이벤트 계약](../features/order-events/README.md#58-orderconfirmed-v1-이벤트-계약).

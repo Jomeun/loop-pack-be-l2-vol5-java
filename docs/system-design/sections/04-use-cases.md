@@ -21,3 +21,7 @@
 ## 4.5 PG 연동의 검증과 관찰
 
 기준 문서: [4.5 PG 연동의 검증과 관찰](../features/order-payment/verification.md#45-pg-연동의-검증과-관찰).
+
+## 4.6 주문 확정 이벤트 발행
+
+기준 문서: [4.6 주문 확정 이벤트 발행](../features/order-events/publication.md#46-주문-확정-이벤트-발행).

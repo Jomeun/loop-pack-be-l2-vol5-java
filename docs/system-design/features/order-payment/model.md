@@ -195,7 +195,7 @@ TX B는 Order 잠금 후 처음 일반 조회한 최신 결제 상태와 잠근 
 |모델·메서드|사전 조건과 결과|
 |---|---|
 |`OrderModel.startPgPayment()`|DRAFT·결제 방식/사용액/성공액 null. PG·pointAmount=0·PAYMENT_PENDING으로 변경|
-|`OrderModel.confirmPg(amount)`|PG·PAYMENT_PENDING, amount=total_amount. paid_amount 기록·CONFIRMED|
+|`OrderModel.confirmPg(amount, confirmedAt)`|PG·PAYMENT_PENDING, amount=total_amount. paid_amount·CONFIRMED·최초 시각 함께 기록. 6주차 목표 확장은 3.7이며 구현 전|
 |`OrderModel.failPg()`|PG·PAYMENT_PENDING. paid_amount=null·PAYMENT_FAILED|
 |`PaymentModel.bindTransaction(key)`|미결합이면 검증한 키 결합, 같은 키면 변경 없음. 다른 키는 recordObservation이 결합 전에 IDENTITY_MISMATCH로 판정하므로(금액 불일치보다 우선) 결합·교체하지 않음. DB unique 위반은 TX 경계에서 처리|
 |`PaymentModel.recordObservation(...)`|식별·금액·종결 판정 결과 반환. 위 복수 거래 → 거래 식별 → 금액 → 종결 판정 순서를 따름. 결제·확인 정보만 변경하고 충돌 근거를 TX 조율자에 반환|

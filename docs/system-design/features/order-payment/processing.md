@@ -349,6 +349,8 @@ PaymentReconcileFacade.reconcile(userId, orderId):  // TX 없음
 
 ### applyObservation 내부 처리
 
+6주차 목표에서는 아래 PG 판정·예약 규칙을 유지하고 최초 확정·저장 뒤 사건 등록을 4.6으로 확장한다. 현재 코드의 1인자 confirmPg와 구분하며, 4.6의 2인자 계약·commit 전 등록 순서가 변경 후 기준이다.
+
 ```text
 TX B applyObservation(token, observation):
   첫 업무 SQL로 Order PK 잠금 → Payment 일반 조회; 선행 조회/Entity 재사용 없음
@@ -390,7 +392,8 @@ TX B applyObservation(token, observation):
     같은 종결이면 재고·이력 효과 없음
     미종결 SUCCESS이면:
       order PAYMENT_PENDING·payment UNKNOWN/PENDING 확인
-      검증한 거래 키 결합; payment SUCCESS·order.confirmPg(amount)
+      검증한 거래 키 결합; payment SUCCESS
+      4.6의 최초 CONFIRM 단계로 order.confirmPg(amount, confirmedAt)·불변 사건 준비
       재고 추가 차감·StockHistory 없음
     미종결 FAILED/REJECTED_NO_EFFECT이면:
       order PAYMENT_PENDING·payment UNKNOWN/PENDING 확인

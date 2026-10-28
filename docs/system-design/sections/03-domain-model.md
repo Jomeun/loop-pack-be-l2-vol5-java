@@ -25,3 +25,7 @@
 ## 3.6 PG 저장 모델과 제약
 
 기준 문서: [3.6 PG 저장 모델과 제약](../features/order-payment/model.md#36-pg-저장-모델과-제약).
+
+## 3.7 최초 PG 확정 시각과 사건 값
+
+기준 문서: [3.7 최초 PG 확정 시각과 사건 값](../features/order-events/README.md#37-최초-pg-확정-시각과-사건-값).

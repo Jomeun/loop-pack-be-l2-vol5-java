@@ -194,10 +194,11 @@ classDiagram
         -Money totalAmount
         -pointAmount
         -Money paidAmount
+        -ZonedDateTime confirmedAt
         +calculateTotal() Money
         -paymentMethod
         +startPgPayment()
-        +confirmPg(amount)
+        +confirmPg(amount, confirmedAt)
         +failPg()
     }
 
