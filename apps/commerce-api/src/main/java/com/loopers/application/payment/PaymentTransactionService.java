@@ -24,11 +24,15 @@ import com.loopers.domain.product.StockHistoryRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import com.loopers.support.transaction.AfterCommitRunner;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -58,6 +62,7 @@ public class PaymentTransactionService {
     private final ProductDetailCache productDetailCache;
     private final AfterCommitRunner afterCommitRunner;
     private final PaymentTransactionProbe probe;
+    private final Clock orderConfirmationClock;
     private final String providerAccount;
 
     public PaymentTransactionService(OrderRepository orderRepository, PaymentRepository paymentRepository,
@@ -65,6 +70,7 @@ public class PaymentTransactionService {
                                      ProductRepository productRepository, StockHistoryRepository stockHistoryRepository,
                                      ProductDetailCache productDetailCache, AfterCommitRunner afterCommitRunner,
                                      PaymentTransactionProbe probe,
+                                     @Qualifier("orderConfirmationClock") Clock orderConfirmationClock,
                                      @Value("${commerce.pg.account-id}") String providerAccount) {
         this.orderRepository = orderRepository;
         this.paymentRepository = paymentRepository;
@@ -74,6 +80,7 @@ public class PaymentTransactionService {
         this.productDetailCache = productDetailCache;
         this.afterCommitRunner = afterCommitRunner;
         this.probe = probe;
+        this.orderConfirmationClock = orderConfirmationClock;
         this.providerAccount = providerAccount;
     }
 
@@ -184,7 +191,7 @@ public class PaymentTransactionService {
 
         PaymentApplyResult.Outcome outcome = switch (decision.effect()) {
             case CONFIRM -> {
-                order.confirmPg(payment.getAmount());
+                order.confirmPg(payment.getAmount(), confirmationTime());
                 yield PaymentApplyResult.Outcome.FINAL;
             }
             case RELEASE -> {
@@ -221,6 +228,16 @@ public class PaymentTransactionService {
         paymentRepository.save(payment);
         reachBeforeCommit("recordConstraintConflict", order.getId());
         return new PaymentApplyResult(OrderInfo.from(order, payment), PaymentApplyResult.Outcome.CONFLICT);
+    }
+
+    /**
+     * 최초 CONFIRM 분기에서만 부른다. 같은 종결의 반복(FINAL_UNCHANGED)은 확정 시각을 다시 만들지 않는다.
+     * DATETIME(6) 의 저장 정밀도와 맞춰 저장 전후 값이 같도록 마이크로초로 절삭한다.
+     */
+    private ZonedDateTime confirmationTime() {
+        return ZonedDateTime.now(orderConfirmationClock)
+            .withZoneSameInstant(ZoneOffset.UTC)
+            .truncatedTo(ChronoUnit.MICROS);
     }
 
     private OrderModel lockOwnedOrder(Long orderId, Long userId) {
@@ -272,11 +289,14 @@ public class PaymentTransactionService {
             && payment.getAmount().equals(order.getTotalAmount())
             && order.getPaymentMethod() == PaymentMethod.PG
             && Long.valueOf(0L).equals(order.getPointAmount());
+        // POINT 주문은 linked 에서 이미 걸러지므로 아래 확정 시각 조건은 PG 주문에만 적용된다.
         boolean statusMatches = switch (order.getStatus()) {
             case PAYMENT_PENDING -> (payment.getStatus() == PaymentStatus.UNKNOWN || payment.getStatus() == PaymentStatus.PENDING)
-                && order.getPaidAmount() == null;
-            case CONFIRMED -> payment.getStatus() == PaymentStatus.SUCCESS && payment.getAmount().equals(order.getPaidAmount());
-            case PAYMENT_FAILED -> payment.getStatus() == PaymentStatus.FAILED && order.getPaidAmount() == null;
+                && order.getPaidAmount() == null && order.getConfirmedAt() == null;
+            case CONFIRMED -> payment.getStatus() == PaymentStatus.SUCCESS && payment.getAmount().equals(order.getPaidAmount())
+                && OrderModel.isUtcMicros(order.getConfirmedAt());
+            case PAYMENT_FAILED -> payment.getStatus() == PaymentStatus.FAILED && order.getPaidAmount() == null
+                && order.getConfirmedAt() == null;
             case DRAFT -> false;
         };
         if (!linked || !statusMatches) {
