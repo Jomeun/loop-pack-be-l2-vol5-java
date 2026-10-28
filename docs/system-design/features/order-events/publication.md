@@ -4,13 +4,13 @@
 
 기존 문서의 계약·절 번호·승인/검증 상태를 보존해 이동했다. 재편 자체는 제품 계약 변경이나 새 실행 검증을 뜻하지 않는다.
 
-**상태:** 발행 측 상세설계는 사용자 검토 전 초안이다. 소비 측 상세설계·전체 최종 승인·구현·실행 검증은 미완료이며 이번 이동에서 소비 계약을 새로 작성하지 않는다.
+**상태:** 2026-10-29 사용자 최종 승인 설계다. 발행·소비 전체 검토와 잔여 보완을 반영했으며 구현·실행 검증은 미완료다. 소비 측 상세설계는 [소비 상세설계](consumption.md)를 따른다. 각 구현 단위는 별도 착수 허락을 받는다.
 
 2026-10-28 GPT 중간 검토 후 사용자가 설정 거절 정책·최소 문서 보완을 승인했다. 아래에 해당 내용을 반영했으며 전체 최종 승인·구현 검증과는 구분한다.
 
 ## 2.11 주문 확정 이벤트 발행의 책임과 설정
 
-**상태:** 2026-10-28 합의한 발행 정책을 구체화한 상세설계 초안. 사용자 세부 검토·전체 설계 승인·구현·실행 검증은 미완료다. 이 절은 발행 측만 다루며 소비 측 저장·ack 상세설계를 대신하지 않는다. 근거·대안은 [A.34](../../decisions/order-events.md#a34-주문-확정-사실의-직접-발행), 처리 순서는 [4.6](#46-주문-확정-이벤트-발행)이다.
+**상태:** 2026-10-29 사용자 승인 상세설계. 구현·실행 검증은 미완료다. 이 절은 발행 측만 다루며 소비 측 저장·ack 상세설계를 대신하지 않는다. 근거·대안은 [A.34](../../decisions/order-events.md#a34-주문-확정-사실의-직접-발행), 처리 순서는 [4.6](#46-주문-확정-이벤트-발행)이다.
 
 ### 클래스와 의존 경계
 
@@ -24,7 +24,7 @@
 |`application/payment/PaymentTransactionService`|최초 CONFIRM 분기에 확정 시각 생성·`confirmPg`·사건 복사·Spring `ApplicationEventPublisher.publishEvent` 등록을 추가. 기존 잠금·PG 판정·저장·반환 순서 유지|
 |`application/order/OrderConfirmedEventListener`|`void on(OrderConfirmed event)`. `@TransactionalEventListener(phase=AFTER_COMMIT, fallbackExecution=false)`. probe 뒤 발행 포트를 한 번 호출. `@Async`·`@Transactional`·Entity 조회 없음. commit 뒤 동기 호출 오류는 안전한 로그로 표시하고 정상 반환|
 |`application/order/OrderPublicationProbe`|`void beforeSend(OrderConfirmed event)`: commit 뒤·send 전 누락 검증용 seam. 기본 bean은 no-op, 테스트만 대상 주문에서 gate·실패를 주입. 공개 HTTP 제어 기능이나 재발행 기능이 아님|
-|`infrastructure/order/KafkaOrderEventPublisher`|발행 포트 구현. `publish`에서 wire DTO 변환·String key·send·Future 완료 로그. nested 불변 `OrderConfirmedV1`·`Item` DTO는 5.8 wire 필드만 가짐. domain·application에 DTO/serializer를 노출하지 않음|
+|`infrastructure/order/KafkaOrderEventPublisher`|bean 이름 `kafkaOrderEventPublisher`인 발행 포트 구현. `publish`에서 wire DTO 변환·String key·send·Future 완료 로그. nested 불변 `OrderConfirmedV1`·`Item` DTO는 5.8 wire 필드만 가짐. domain·application에 DTO/serializer를 노출하지 않음|
 |`config/OrderEventKafkaProperties`|`commerce.order-events` 설정 바인딩. `topic` 기본 `order-events`, `producerProperties`는 아래 표의 설정 map, `physicalCloseTimeoutSeconds` 기본 15. topic 공백·close 음수는 기동 오류. 테스트에서 topic만 고유 suffix로 대체 가능|
 |`config/OrderEventKafkaConfig`|이름 `orderEventProducerFactory`, `orderEventKafkaTemplate`인 전용 bean. publisher는 qualifier로 전용 template을 주입. `Clock` bean `orderConfirmationClock`은 `Clock.systemUTC()`, TX 담당 객체도 qualifier로 사용|
 
@@ -73,11 +73,31 @@ transactionIdPrefix·producerPerThread·autoFlush는 사용하지 않음
 |`key.serializer` / `value.serializer`|String / JSON|5.8 계약. Java 클래스 header에 소비 계약을 의존시키지 않음|
 |`spring.json.add.type.headers`|`false`|공통 YAML에도 있는 값을 전용 producer에 실제 적용|
 
-수치는 운영 적정값이나 실측 결과가 아니다. 초안은 정상 최초 전송·일시적 지연에 여유를 주는 쪽을 택했고, cold start·broker 장애에서 요청/결과 관측이 길어지는 비용을 수용한다. `delivery.timeout.ms >= request.timeout.ms + linger.ms`, idempotence의 acks·retries·in-flight 호환을 확인한다. producer 최초 생성·객체 직렬화 등 모든 지연을 5초로 보장하지 않는다. 바인딩된 YAML과 실제 factory map·serializer·전송 metadata를 구분해 검증한다.
+수치는 운영 적정값이나 실측 결과가 아니다. 현재 초기값은 정상 최초 전송·일시적 지연에 여유를 주는 쪽을 택했고, cold start·broker 장애에서 요청/결과 관측이 길어지는 비용을 수용한다. `delivery.timeout.ms >= request.timeout.ms + linger.ms`, idempotence의 acks·retries·in-flight 호환을 확인한다. producer 최초 생성·객체 직렬화 등 모든 지연을 5초로 보장하지 않는다. 바인딩된 YAML과 실제 factory map·serializer·전송 metadata를 구분해 검증한다.
+
+### 기존 회귀와 실제 발행 검증의 분리
+
+기존 API 회귀 테스트의 기본 발행 포트는 테스트 소스에만 둔 기록용 `RecordingOrderEventPublisher`다. 공통 테스트 상위 클래스 `testsupport/OrderEventRecordingTestSupport`의 `OrderEventPublisher` 필드에 `@TestBean(name="kafkaOrderEventPublisher", methodName="createRecordingOrderEventPublisher", enforceOverride=true)`를 두고, 인자 없는 static factory `createRecordingOrderEventPublisher()`가 기록용 구현을 만든다. Spring의 test bean override 기능을 사용하며 동명 일반 @Bean 등록이나 allow-bean-definition-overriding 전역 허용으로 대체하지 않는다. 기존 API 전체 Spring 컨텍스트 회귀는 이 클래스를 직접/기존 공통 상위 클래스를 통해 상속하도록 연결하고 호출 사건·횟수를 보관한다. `@Primary`만 추가해 두 포트가 임의 선택되게 하지 않는다. 이 경로는 producer를 호출하거나 metadata를 대기하지 않으며, broker가 켜져 있어도 기본 `order-events`에 쓰지 않는다. 실제 실행의 기본 adapter는 계속 Kafka이며 fake를 런타임 대안으로 노출하는 운영 설정은 추가하지 않는다.
+
+실제 adapter 검증 클래스는 테스트 전용 타입 marker `@RealOrderEventKafkaTest`를 명시하고 기록용 상위 클래스를 상속하지 않는다. 누락 탐지는 개별 @Import에 맡기지 않는다. `apps/commerce-api/src/test/resources/META-INF/spring.factories`에 등록한 테스트 전용 `OrderEventTestContextCustomizerFactory`가 모든 API Spring TestContext에 guard를 등록한다. factory는 test-only `OrderEventTestGuard`(SmartInitializingSingleton) bean 정의를 등록하며, guard는 singleton 준비 후·테스트 실행/업무 요청 전에 포트가 있는 전체 API 컨텍스트를 검사한다. marker 없음 → 기록용 구현 한 개만 허용, marker 있음 → 실제 Kafka adapter 한 개만 허용, 누락·복수·구현 불일치는 기동 실패다. marker 없이 상속을 빠뜨린 회귀도 실제 adapter로 실행되지 않는다. 포트를 로드하지 않는 slice/순수 단위 테스트는 검사 대상이 아니다. customizer의 컨텍스트 캐시 구분에도 실제/fake mode를 반영하고, guard/marker/fake는 API 테스트 소스·리소스에만 두어 별도 streamer JVM이나 실제 앱에 포함하지 않는다.
+
+P2·P3와 기존 회귀는 기록용 포트로 사건 등록·commit 순서·미발행을 확인한다. P4의 실제 wire 관찰, P5의 adapter/설정 검증, P6~P8·C10은 별도 테스트 컨텍스트에서 fake override를 제외하고 실제 adapter·전용 template을 명시적으로 사용한다. P5의 send/Future 오류 단위 검증에 template 대역을 쓰면 broker 실행 근거와 구분한다. 각 컨텍스트는 발행 포트가 의도한 구현 하나인지 확인하고, 실제 broker 검증은 record·metadata도 확인해 fake의 호출 기록으로 대체하지 않는다. P9의 기존 기대값·시간 제한을 Kafka 편의를 위해 완화하지 않는다.
+
+기록용 fake는 `publish(event)` 안에서 동기적으로 호출하는 선택적 관찰 hook을 제공한다. 기본은 기록만 하고, P2는 이 hook에서 관찰 작업을 요청·유한 대기해 포트 호출 시점의 commit을 확인한다. 관찰 결과·오류는 테스트가 직접 확인하며 listener의 오류 로그만으로 성공 처리하지 않는다. 캐시된 컨텍스트를 재사용할 때 기록·hook은 독립 테스트 전 reset하고 진행 중 관찰 작업을 먼저 끝낸다.
+
+P2의 발행 포트 호출 시 commit 관찰은 별도 스레드에서 새 readOnly TX/영속성 컨텍스트를 열어 같은 MySQL을 조회한다. AFTER_COMMIT 호출 스레드의 JdbcTemplate/같은 DataSource만으로 연결 독립성을 가정하지 않는다. 별도 스레드 작업은 제한 시간 안에 끝내고 정리하며, 실제 원 TX와 다른 연결을 사용했음을 확인한다. AFTER_COMMIT 호출자가 연결을 보유한 채 기다릴 수 있으므로 동시 관찰 수를 제한해 기존 test pool(최대 10)에 관찰용 연결 여유를 남긴다. 풀 획득 timeout·관찰 실패를 commit 성공으로 바꾸거나 대기값을 임의로 늘리지 않는다.
+
+실제 adapter로 PG callback 경로를 타는 P6·P8에도 C10의 준비 원칙을 적용한다. 별도 고유 준비용 topic으로 실제 사용할 전용 producer의 초기 metadata·전송 준비를 확인한 뒤 업무 입력을 진행하고, callback HTTP 결과·DB 확정·broker 결과를 나눠 관찰한다. 기존 1초 callback 제한과 회귀 기대값은 유지하며, 준비된 환경의 관찰을 cold start 지연 해결 근거로 삼지 않는다.
 
 ### broker와 정상 종료
 
-local·test의 producer·consumer·admin은 각 실행에서 같은 실제 broker의 접근 가능한 bootstrap 주소를 받는다. 호스트 `localhost:19092`와 컨테이너 내부 `kafka:9092`를 같은 접근 경로라고 가정하지 않는다. 테스트는 고유 topic·group과 소유한 자원만 정리한다. topic 생성은 준비 단계의 명시적 admin 작업으로 하며 send의 자동 생성에 기대지 않는다. 단일 broker topic의 복제 계수·min ISR가 `acks=all` 쓰기를 허용하는지 확인한다. 애플리케이션의 운영 partition 수·증설 정책은 이번 발행 초안에서 새로 정하지 않는다. 필수 배정 실험 topic은 원문대로 partition 2개다.
+테스트 broker는 사용자가 로컬 Docker로 실행한 기존 Kafka를 공유한다. Kafka Testcontainers·추가 broker를 생성하지 않고 broker image/version도 변경하지 않는다. 현재 compose의 `bitnamilegacy/kafka:3.5.1`은 선언된 초기 환경 정보이며 실제 실행 server/client 버전은 구현 검증에서 기록한다. broker 연결 실패·topic 준비 실패는 검증 실패로 보고하고 skip·통과·다른 broker로의 자동 우회로 바꾸지 않는다.
+
+공통 연결/자원 helper는 `modules/kafka/src/testFixtures/java/com/loopers/testsupport/LocalKafkaTestSupport`에 둔다. broker를 띄우는 fixture가 아니라 JVM별 AdminClient 수명과 실행별 자원 소유 목록을 관리한다. bootstrap은 명시적인 테스트 입력을 우선하고 기본 호스트 주소는 `localhost:19092`다. `spring.kafka.bootstrap-servers`와 `spring.kafka.admin.properties[bootstrap.servers]`, 직접 생성하는 producer/consumer/AdminClient에 모두 같은 접근 주소를 준다. local/test YAML의 admin `kafka:9092`가 별도로 남지 않도록 실제 유효 map도 검증한다. C10의 자식 streamer JVM에도 동일한 호스트 주소를 실행 인자로 전달한다.
+
+각 시나리오는 실행 식별자가 들어간 `order-events-test-{runId}` topic·`purchase-activity-test-{runId}` group을 생성한다. 배정 실험은 별도 topic을 사용한다. 기본 `order-events`·`purchase-activity` 및 다른 실행 자원은 소비·초기화·삭제하지 않는다. 컨텍스트 refresh/consumer 구독보다 앞선 static 준비·DynamicPropertySource 단계에서 AdminClient로 topic을 명시적으로 만들고 빈 시작 offset·partition 수를 확인한다. 별도 C10 자식도 topic 준비 뒤 기동한다. 전용 consumer와 직접 만드는 모든 테스트 consumer에는 `allow.auto.create.topics=false`를 실제 ConsumerConfig map에 적용한다. client map의 `auto.create.topics.enable=false`는 broker 자동 생성 설정을 바꾸지 못하므로 이를 근거로 삼지 않는다. 이 consumer 설정만으로 producer나 다른 client의 자동 생성까지 막았다고 주장하지 않고 broker 전역 설정도 변경하지 않는다. 각 topic은 partition 2개·복제 계수 1로 준비하고 단일 broker의 min ISR가 `acks=all` 쓰기를 허용하는지 확인한다. 이는 테스트 구성이며 앱의 운영 partition 수·증설 정책은 새로 정하지 않는다.
+
+부모 테스트 실행은 소유 목록에 등록된 topic/group만 정리한다. 먼저 listener·별도 JVM·직접 consumer를 종료하고 group 비활성을 확인한 뒤 group/topic을 삭제하고 유한 대기 동안 삭제 완료·topic 재생성 없음도 확인한 뒤 AdminClient를 닫는다. Spring 컨텍스트가 캐시돼 있어도 구독 listener를 실제 정지시키고, 재사용 전 다음 시나리오 topic을 먼저 준비한다. 부분 준비 실패에도 동일하게 정리하고 오류를 보고한다. 공유 Docker Kafka를 중지하거나 볼륨·기존 topic을 지우지 않는다. 환경은 공유하지만 이름·offset·소비 member는 실행별로 격리하며, DB를 공유하는 시나리오는 소비 문서의 순차 실행/초기화 조건도 따른다.
 
 HTTP는 기존 `server.shutdown=graceful`, `spring.lifecycle.timeout-per-shutdown-phase=30s`를 명시한다. 전용 singleton·비트랜잭션 producer의 physical close 대기는 15초다. HTTP 진행 요청의 사건 등록·send가 끝난 뒤 factory가 종료되는 실제 lifecycle 순서를 확인한다. Spring Kafka 3.3.4 소스의 factory phase는 `Integer.MIN_VALUE`, stop은 destroy로 연결되지만 실제 bean 의존성과 종료 로그 검증을 대신하지 않는다.
 
@@ -85,7 +105,7 @@ HTTP는 기존 `server.shutdown=graceful`, `spring.lifecycle.timeout-per-shutdow
 
 ## 4.6 주문 확정 이벤트 발행
 
-**상태:** 2026-10-28 발행 측 상세설계 초안. 아래 코드는 처리 계약을 설명하는 의사코드이며 구현·실행 결과가 아니다. 4.3의 PG 검증·잠금·예약·충돌 보존을 유지하고 최초 확정 분기에만 사건을 등록한다. 클래스는 2.11, 저장·시각은 3.7, wire 계약·로그는 5.8, 대안·한계는 A.34를 따른다.
+**상태:** 2026-10-29 사용자 승인 발행 상세설계. 아래 코드는 처리 계약을 설명하는 의사코드이며 구현·실행 결과가 아니다. 4.3의 PG 검증·잠금·예약·충돌 보존을 유지하고 최초 확정 분기에만 사건을 등록한다. 클래스는 2.11, 저장·시각은 3.7, wire 계약·로그는 5.8, 대안·한계는 A.34를 따른다.
 
 ### 공통 결과 적용과 snapshot 생성
 
@@ -175,19 +195,19 @@ KafkaOrderEventPublisher.publish(event): // TX 없음, 전용 KafkaTemplate qual
 
 ### 발행 측 검증 기준 — 실행 전
 
-다음은 구현 단위에서 수행할 통과 기준이다. 이 초안 작성 중에는 실행하지 않았다. 기존 PG 전체 테스트 수치·mock 호출 성공을 실제 Kafka 발행 검증으로 대신하지 않는다.
+다음은 구현 단위에서 수행할 통과 기준이다. 설계 작성 중에는 실행하지 않았다. 기존 PG 전체 테스트 수치·mock 호출 성공을 실제 Kafka 발행 검증으로 대신하지 않는다.
 
 |ID·계층|사례와 필수 관찰|
 |---|---|
 |P1 domain·snapshot|최초 확정 시각 설정, 재확정 거절, 동일 ID 유도, 원본 각각의 양수 수량 검사 뒤 중복 합산·overflow 검사, 불변 List·품목. 같은 상품의 -1·3이 합계 2로 은폐되지 않고 실패. 외부 Entity 변경 영향 없음. 경계 동작 중심으로 검증|
-|P2 실제 Spring TX·MySQL|즉시 SUCCESS·callback·reconcile 각각 최초 확정 commit 뒤 포트 호출. 포트 호출 시점에 기존 스레드의 TX에 참여하지 않는 별도 DB 연결/독립 TX로 CONFIRMED·confirmedAt이 보이는지 확인. listener 호출 여부나 isActualTransactionActive 플래그만으로 commit을 입증하지 않음. callback/reconcile 동시 경쟁은 실제 Order 잠금으로 등록 1회·시각 불변. 일반 포트 대역은 broker 저장 근거로 쓰지 않음|
+|P2 실제 Spring TX·MySQL|즉시 SUCCESS·callback·reconcile 각각 최초 확정 commit 뒤 포트 호출. 포트 호출 시점에 기존 스레드의 TX에 참여하지 않는 별도 스레드의 새 TX·실제 별도 DB 연결로 CONFIRMED·confirmedAt이 보이는지 확인. listener 호출 여부나 isActualTransactionActive 플래그만으로 commit을 입증하지 않음. callback/reconcile 동시 경쟁은 실제 Order 잠금으로 등록 1회·시각 불변. 관찰 hook의 결과/실패도 테스트가 직접 확인. 일반 포트 대역은 broker 저장 근거로 쓰지 않음|
 |P3 미발행·rollback|DRAFT·PENDING·UNKNOWN·RELEASE·CONFLICT·FINAL_UNCHANGED·POINT 경로 등록 0. 내부 사건 등록 뒤 BEFORE_COMMIT 실패와 실제 commit 제약 실패에서 send 0·업무 전체 rollback. 테스트 상위 TX의 자동 rollback을 commit 성공으로 해석하지 않음|
 |P4 저장·직렬화|실제 DDL의 DATETIME(6)·nullable, 고정 Clock의 나노초 입력을 마이크로초 절삭. commit 뒤 1차 캐시가 아닌 새 컨텍스트/직접 SQL로 DB의 Instant·마이크로초 정밀도 비교. 실제 record의 key, 필수 JSON 필드 전체의 이름·타입·값, 시각 Z 표현·수량·type header 미발행 확인. Java 객체의 값만으로 wire 일치를 판단하지 않음|
 |P5 전용 설정·오류|factory 실제 map에서 공통 retries=3 미상속·나머지 2.11 값 확인. transactional.id 혼입 기동 거절과 정상 factory.transactionCapable=false, 기존 공통/전용 bean 주입 관계·전용 qualifier·serializer properties 실제 적용을 확인. send 호출 오류와 Future 실패 각각 확정 유지·안전 로그·PG 추가 생성 0. timeout을 미기록 증거로 삼지 않음|
-|P6 실제 정상 발행|실제 주문 API·PG fixture·결과 TX·broker를 거쳐 key·eventId·DB 품목·시각·성공 metadata를 새 조회로 비교. producer가 partition을 고르고 실제 위치를 관측. 소비 DB 완료 증거는 후속 소비 설계·검증과 결합|
+|P6 실제 정상 발행|실제 주문 API·PG fixture·결과 TX·broker를 거쳐 key·eventId·DB 품목·시각·성공 metadata를 새 조회로 비교. producer가 partition을 고르고 실제 위치를 관측. 소비 DB 완료 증거는 `consumption.md` C10과 결합|
 |P7 commit→send 공백|대상 주문만 beforeSend probe에서 실패 주입. 새 TX/SQL로 CONFIRMED·시각·예약 소비 유지, adapter send 0 확인. 격리 topic의 모든 partition별 시작/끝 offset을 고정하고 각 유한 구간을 끝까지 읽어 eventId record 없음 확인. 주문 commit 뒤 장벽으로 주입 위치를 입증. listener 로그만으로 부재를 주장하지 않으며 모든 Kafka 경로·시점의 미발행으로 일반화하지 않음|
 |P8 정상 종료|진행 HTTP 요청의 사건 등록·send와 producer factory close의 순서, 대기 예산·관측 가능한 완료/실패 callback·IO thread 정리를 실제 컨텍스트 종료에서 확인. 정상 완료와 close 예산 소진·관측 누락을 구분한다. callback 로그 없음만으로 전송 성공을 판정하거나 모든 record의 로그 확보를 보장하지 않음. 각 phase timeout을 전체 종료 보장으로 오해하지 않음. 지연 주입 시 통제 실패라고 명시|
-|P9 회귀·구조|기존 PG·예약·금액·소유권·POINT 사실·삭제 비노출·캐시와 기존 의미 있는 테스트 유지. 필요한 PG fixture 시각 입력만 새 계약으로 보강하고 이유 기록. 관련 Checkstyle·ArchUnit 포함|
+|P9 회귀·구조|기존 PG·예약·금액·소유권·POINT 사실·삭제 비노출·캐시와 기존 의미 있는 테스트 유지. 기존 회귀의 기본 포트는 기록용 fake이며 실제 adapter 검증은 별도 컨텍스트로 구분. 필요한 PG fixture 시각 입력만 새 계약으로 보강하고 이유 기록. 공통 fake 상속/실제 marker 누락 시 guard 기동 실패와 정상 fake/실제 컨텍스트 선택을 확인. 관련 Checkstyle·ArchUnit 포함|
 
 ### 다음 주 재현 준비와 검증 범위
 
@@ -195,7 +215,7 @@ KafkaOrderEventPublisher.publish(event): // TX 없음, 전용 KafkaTemplate qual
 
 이 과제의 거래 식별자는 기존 로컬 합성 PG/fixture에서 실제 생성한 값이다. 이 재현에 필요한 값을 임의 마스킹하여 원문 필수 근거를 잃지 않으며, 실제 외부 PG 계정·거래나 비밀정보를 사용·공개하는 기능을 추가하지 않는다.
 
-정상 소비 결과·실제 listener 실패/ack·소비 DB commit 뒤 offset 공백·partition 2개와 consumer 1→2→3 배정은 필수로 남는다. 다만 이 단위에서 소비 클래스·오류 복구 의사코드를 작성하지 않고 후속 설계에서 통합한다. P7은 DB→broker 공백, 소비 재전달은 DB→offset 공백이라 서로 대체하지 않는다. 준비·대기에는 deadline을 두고 시작한 consumer·HTTP fixture·broker·DB를 정리하며 임시 DB를 다음 주까지 유지하지 않는다. 선택적 동기/비동기·timeout 비교 실험은 글 주제 선정과 별도 승인 전까지 추가하지 않는다.
+정상 소비 결과·실제 listener 실패/ack·소비 DB commit 뒤 offset 공백·partition 2개와 consumer 1→2→3 배정은 필수로 남는다. 소비 클래스·오류 복구·재전달·종단 검증은 `consumption.md`의 2~7절·C6~C10에 통합했다. P7은 DB→broker 공백, 소비 재전달은 DB→offset 공백이라 서로 대체하지 않는다. 준비·대기에는 deadline을 두고 시작한 consumer·HTTP fixture·별도 JVM·테스트 DB와 소유 topic/group을 정리하며, 공유 Docker broker는 유지하고 임시 DB를 다음 주까지 유지하지 않는다. 선택적 동기/비동기·timeout 비교 실험은 글 주제 선정과 별도 승인 전까지 추가하지 않는다.
 
 ### 성공·실패의 공개 의미와 로그
 
