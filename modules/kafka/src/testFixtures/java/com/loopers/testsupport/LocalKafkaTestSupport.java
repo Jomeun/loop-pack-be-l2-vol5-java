@@ -170,6 +170,24 @@ public final class LocalKafkaTestSupport implements AutoCloseable {
         return offsets(topic, OffsetSpec.latest());
     }
 
+    /** 소유 group 의 broker committed offset. consumer position·poll 결과가 아니라 broker 가 저장한 값이다. commit 이 없는 partition 은 빠진다. */
+    public Map<TopicPartition, Long> committedOffsets(String group) {
+        requireOwned(group);
+        Map<TopicPartition, Long> committed = new HashMap<>();
+        get(admin.listConsumerGroupOffsets(group).partitionsToOffsetAndMetadata()).forEach((partition, offset) -> {
+            if (offset != null) {
+                committed.put(partition, offset.offset());
+            }
+        });
+        return committed;
+    }
+
+    /** 소유 group 의 broker 측 상태·member·배정. 값을 바꾸지 않는다. */
+    public ConsumerGroupDescription describeGroup(String group) {
+        requireOwned(group);
+        return get(admin.describeConsumerGroups(List.of(group)).all()).get(group);
+    }
+
     /** 직접 만드는 테스트 consumer 설정. 자동 commit·topic 자동 생성 요청을 끈 값을 실제 map 에 둔다. group 이 null 이면 assign 전용이다. */
     public Map<String, Object> consumerConfig(String group) {
         Map<String, Object> config = new HashMap<>();
@@ -181,12 +199,16 @@ public final class LocalKafkaTestSupport implements AutoCloseable {
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         config.put(ConsumerConfig.CLIENT_ID_CONFIG, "local-kafka-test-consumer-" + runId + "-" + sequence.incrementAndGet());
         if (group != null) {
-            if (!ownedGroups.contains(group)) {
-                throw new IllegalArgumentException("이 실행이 소유하지 않은 group 입니다. [group = " + group + "]");
-            }
+            requireOwned(group);
             config.put(ConsumerConfig.GROUP_ID_CONFIG, group);
         }
         return config;
+    }
+
+    private void requireOwned(String group) {
+        if (!ownedGroups.contains(group)) {
+            throw new IllegalArgumentException("이 실행이 소유하지 않은 group 입니다. [group = " + group + "]");
+        }
     }
 
     /**
