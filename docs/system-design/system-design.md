@@ -7,7 +7,7 @@
 ## 현재 상태
 
 - 기존 커머스·PG 결제·PG 단독 실행 앱의 계약과 과거 검증 근거를 보존한다. 실행 범위·수량·한계는 아래 검증 기록을 따른다.
-- 주문 확정 이벤트의 **발행·소비 상세설계는 2026-10-29 사용자 최종 승인 기준**이다. GPT·Claude 검토 후 보완과 실패·복구 한계를 확인했다. 구현·빌드·테스트·실험은 아직 실행하지 않았으며, 구현 착수는 작은 작업 단위별로 별도 승인받는다. DLQ는 현재 구현 범위 밖의 후속 확장 후보다.
+- 주문 확정 이벤트의 **발행·소비 상세설계는 2026-10-29 사용자 최종 승인 기준**이다. 승인된 단위별로 발행 P1~P9·소비 C1~C10을 구현하고 관련 검증을 실행했다. 실제 관찰·재현 방법·회귀 결과와 미검증 한계는 [주문 이벤트 실행 기록](verification/order-events.md)을 따른다. Outbox·랭킹 API·자동 재발행은 현재 범위 밖이며 DLQ는 별도 설계·승인 대상이다.
 - 공통·기능별 설계·판단 근거·과거 기록으로 재편했다. 기존 절 번호와 A 식별자는 참조를 위해 유지한다. 각 계약의 원본은 아래 기준 문서 한 곳에 둔다.
 
 ## 문서 구성
@@ -42,7 +42,7 @@
 |---|---|
 | 판단 이유·대안·비용·재검토 조건 | [공통 도메인·API A.1~A.15](decisions/domain-and-api.md) · [상품 캐시 A.16](decisions/product-cache.md) · [PG 결제 A.17~A.32](decisions/payment.md) · [PG 앱 A.33](decisions/pg-simulator.md) · [이벤트 A.34·A.35](decisions/order-events.md) |
 | 현재 검증 기준 | 기능별 검증 절. PG 전환 표처럼 기준/결과가 혼합된 기존 자료는 [PG 전환 기록](verification/pg-simulator.md)에서 함께 보존 |
-| 날짜별 실제 실행·한계 | [기존 기능](verification/core-features.md) · [PG 결제](verification/payment.md) · [PG 앱 전환](verification/pg-simulator.md) |
+| 날짜별 실제 실행·한계 | [기존 기능](verification/core-features.md) · [PG 결제](verification/payment.md) · [PG 앱 전환](verification/pg-simulator.md) · [주문 이벤트](verification/order-events.md) |
 | 과거 계약·승인·진척 | [이전 POINT 설계·검증](verification/legacy-point.md) · [설계 변경 이력](verification/design-history.md) |
 
 과거 기록의 당시 미구현/미검증·검사 수량은 해당 시점의 설명이다. 현재 기능의 계약이나 이번 작업의 실행 결과로 대체하지 않는다. 삭제된 상품·과거 POINT 주문 등 여전히 유효한 보존 계약은 현재 기능 문서에서도 유지한다.

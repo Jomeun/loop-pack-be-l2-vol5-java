@@ -1,6 +1,6 @@
 # 주문 확정 이벤트 소비 상세설계
 
-**상태:** 2026-10-29 사용자 최종 승인 소비 상세설계다. GPT·Claude 전체 검토/재검토와 잔여 보완을 반영했다. 새 group의 earliest, 중단형 오류 처리, 공유 테스트 자원과 C10만 별도 JVM 사용을 유지한다. 구현·실행 검증은 미완료이며 각 구현 단위는 별도 착수 허락을 받는다.
+**상태:** 2026-10-29 사용자 최종 승인 소비 상세설계다. GPT·Claude 전체 검토/재검토와 잔여 보완을 반영했다. 새 group의 earliest, 중단형 오류 처리, 공유 테스트 자원과 C10만 별도 JVM 사용을 유지한다. 별도 승인한 구현 단위와 관련 실행 검증을 마쳤다. 조건·한계는 [검증 기록](../../verification/order-events.md)을 따른다.
 
 기준 wire 계약은 [이벤트 계약](README.md#58-orderconfirmed-v1-이벤트-계약), 발행 경계는 [발행 상세설계](publication.md)다. 이 문서는 소비 모델·파싱·DB TX·ack·실패·필수 전달 검증을 한 곳에서 검토할 수 있게 묶는다. 대안·선택 근거는 이 문서 마지막에 둔다. 물리 DB/스키마 분리를 새로 강제하지 않고 기존 JPA 연결을 사용하되, 주문 쓰기와 구매 활동 쓰기는 서로 다른 업무 TX다.
 
@@ -189,7 +189,9 @@ DDL의 원본은 streamer 두 Entity의 column/unique/CHECK 매핑이다. 독립
 
 기존 demo listener는 구매 활동 group·topic을 구독하지 않는다. 통합 테스트 프로필에서는 demo bean을 명시적으로 비활성화하여 demo topic 부재가 기동·로그를 방해하지 않게 한다. streamer의 application.name을 commerce-streamer로 바로잡아 관측을 구분하고 외부 HTTP API를 새로 만들지 않는다. 새 테스트에 필요한 streamer Checkstyle·layer 의존 검증을 연결하되 API/PG의 기존 검사 규칙을 약화하지 않는다.
 
-## 7. 실제 전달·복구 검증 기준 — 미실행
+## 7. 실제 전달·복구 검증 기준
+
+아래는 통과 기준이다. 실행별 관찰값·회귀 수량과 미재현 조건은 [검증 기록](../../verification/order-events.md)에 분리한다.
 
 |ID|통과에 필요한 관찰|
 |---|---|
@@ -258,7 +260,7 @@ PG simulator callback의 기존 1초 응답 제한은 늘리지 않는다. 아�
 |테스트 자원|기존 MySQL 테스트 DB와 로컬 Docker Kafka 공유, DB 초기화 직렬화·고유 topic/group·C10만 별도 JVM|전용 DB/broker 컨테이너는 격리·자동 준비에 유리하지만 추가 기동/자원 비용. 공유안은 Docker 사전 기동·주소·명시적 cleanup·동시 접근 통제 비용을 수용|
 |시간·과거 사실|이벤트 확정 시각·품목 보존, 현재 Product/Order 조회 없음|현재 도메인 조회는 참조 존재 확인을 더할 수 있지만 과거 사실을 덮거나 삭제와 불필요하게 결합. scalar 저장에는 수동 SQL 고아/손상 한계|
 
-근거는 실습 원문의 완료 기록·활동 단일 TX·명명 unique·rollback 후 재확인·record listener·두 공백·group 배정 요구와 현재 streamer/demo 설정 읽기다. 로컬 Spring Kafka 3.3.4의 CommonContainerStoppingErrorHandler 소스에서 비정상 stop·예외 전파 경로, KafkaMessageListenerContainer의 doCommitSync/checkRebalanceCommits에서 rebalance 중 commit 보류·소유 partition 재시도, ContainerProperties에서 MANUAL_IMMEDIATE·asyncAcks·assignment 옵션을 읽었다. 실제 실행 버전·효과는 미검증이다. completion 테이블 설계·전체 품목 비교·early flush·중단형 연결은 이 요구에 대한 구체화이며 성능 비교 결과가 아니다.
+근거는 실습 원문의 완료 기록·활동 단일 TX·명명 unique·rollback 후 재확인·record listener·두 공백·group 배정 요구와 현재 streamer/demo 설정 읽기다. 로컬 Spring Kafka 3.3.4의 CommonContainerStoppingErrorHandler 소스에서 비정상 stop·예외 전파 경로, KafkaMessageListenerContainer의 doCommitSync/checkRebalanceCommits에서 rebalance 중 commit 보류·소유 partition 재시도, ContainerProperties에서 MANUAL_IMMEDIATE·asyncAcks·assignment 옵션을 읽었다. 이는 설계 시점의 소스 확인이며, 이후 실행한 버전·실제 효과·미재현 조건은 [검증 기록](../../verification/order-events.md)에 구분해 남겼다. completion 테이블 설계·전체 품목 비교·early flush·중단형 연결은 이 요구에 대한 구체화이며 성능 비교 결과가 아니다.
 
 retention 밖 유실·영구 오류의 운영 복구·실제 다중 broker 장애·자동 재발행·exactly-once 분산 TX는 보장하지 않는다. 같은 record 재전달에도 구매 DB 효과 한 번이라는 경계만 설명하며 Kafka 모든 경로의 exactly-once라고 부르지 않는다. DB 손상·처리량·품목 규모·새 버전/다른 eventType·다른 소비 기능 요구가 생기면 저장/비교/오류 정책을 다시 검토한다.
 
