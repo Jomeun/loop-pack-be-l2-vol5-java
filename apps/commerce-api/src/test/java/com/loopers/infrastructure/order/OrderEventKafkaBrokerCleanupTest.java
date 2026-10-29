@@ -1,6 +1,6 @@
 package com.loopers.infrastructure.order;
 
-import com.loopers.infrastructure.order.OrderEventKafkaBrokerIntegrationTest.CleanupStep;
+import com.loopers.infrastructure.order.OrderEventTestCleanup.Step;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -24,13 +24,13 @@ class OrderEventKafkaBrokerCleanupTest {
         IllegalStateException pgFailure = new IllegalStateException("PG 종료 실패 주입");
         IllegalStateException kafkaFailure = new IllegalStateException("Kafka 정리 실패 주입");
 
-        Throwable thrown = catchThrowable(() -> OrderEventKafkaBrokerIntegrationTest.runCleanup(List.of(
-            new CleanupStep("PG fixture 종료", () -> {
+        Throwable thrown = catchThrowable(() -> OrderEventTestCleanup.runAll(List.of(
+            new Step("PG fixture 종료", () -> {
                 attempted.add("pg");
                 throw pgFailure;
             }),
-            new CleanupStep("검증 전용 스키마 삭제", () -> attempted.add("schema")),
-            new CleanupStep("Kafka 소유 topic·group 정리", () -> {
+            new Step("검증 전용 스키마 삭제", () -> attempted.add("schema")),
+            new Step("Kafka 소유 topic·group 정리", () -> {
                 attempted.add("kafka");
                 throw kafkaFailure;
             }))));
@@ -48,9 +48,9 @@ class OrderEventKafkaBrokerCleanupTest {
     void completesWhenEveryStepSucceeds() {
         List<String> attempted = new ArrayList<>();
 
-        OrderEventKafkaBrokerIntegrationTest.runCleanup(List.of(
-            new CleanupStep("a", () -> attempted.add("a")),
-            new CleanupStep("b", () -> attempted.add("b"))));
+        OrderEventTestCleanup.runAll(List.of(
+            new Step("a", () -> attempted.add("a")),
+            new Step("b", () -> attempted.add("b"))));
 
         assertThat(attempted).containsExactly("a", "b");
     }

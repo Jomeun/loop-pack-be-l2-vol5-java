@@ -15,7 +15,7 @@ import com.loopers.fixture.pg.CreateOutcome;
 import com.loopers.fixture.pg.PgFixtureServer;
 import com.loopers.fixture.pg.PgOperation;
 import com.loopers.fixture.pg.ResponsePlan;
-import com.loopers.infrastructure.order.OrderEventKafkaBrokerIntegrationTest.CleanupStep;
+import com.loopers.infrastructure.order.OrderEventTestCleanup.Step;
 import com.loopers.testsupport.LocalKafkaTestSupport;
 import com.loopers.utils.DatabaseCleanUp;
 import com.loopers.utils.RedisCleanUp;
@@ -108,6 +108,8 @@ class OrderEventEndToEndIntegrationTest {
     private static String topic;
     private static String group;
     private static final C10Probe PROBE = new C10Probe();
+    /** 주문 ID → 주문한 사용자 ID. 확정 요청의 X-USER-ID 에 쓴다. */
+    private static final Map<Long, Long> USERS = new java.util.concurrent.ConcurrentHashMap<>();
 
     private final RestTemplate http = client();
 
@@ -126,9 +128,9 @@ class OrderEventEndToEndIntegrationTest {
 
     @AfterAll
     static void releaseResources() {
-        OrderEventKafkaBrokerIntegrationTest.runCleanup(List.of(
-            new CleanupStep("streamer 자식 JVM 종료", OrderEventEndToEndIntegrationTest::stopStreamer),
-            new CleanupStep("API 테스트 데이터 정리·컨텍스트 종료", () -> {
+        OrderEventTestCleanup.runAll(List.of(
+            new Step("streamer 자식 JVM 종료", OrderEventEndToEndIntegrationTest::stopStreamer),
+            new Step("API 테스트 데이터 정리·컨텍스트 종료", () -> {
                 if (api != null) {
                     try {
                         api.getBean(DatabaseCleanUp.class).truncateAllTables();
@@ -138,18 +140,18 @@ class OrderEventEndToEndIntegrationTest {
                     }
                 }
             }),
-            new CleanupStep("PG fixture 종료", () -> {
+            new Step("PG fixture 종료", () -> {
                 if (pg != null) {
                     pg.close();
                 }
             }),
             // 자식이 같은 DB 에 만든 두 테이블을 지워 API 테스트 DB 를 API Entity 테이블만 남긴 상태로 돌린다.
-            new CleanupStep("구매 테이블 삭제", () -> {
+            new Step("구매 테이블 삭제", () -> {
                 if (fresh != null) {
                     PURCHASE_TABLES.forEach(table -> fresh.execute("DROP TABLE IF EXISTS " + table));
                 }
             }),
-            new CleanupStep("Kafka 소유 topic·group 정리", () -> {
+            new Step("Kafka 소유 topic·group 정리", () -> {
                 if (kafka != null) {
                     kafka.close();
                 }
@@ -159,7 +161,40 @@ class OrderEventEndToEndIntegrationTest {
     @DisplayName("한 streamer JVM 에서 미발행 사건(broker·구매 활동 없음)과 정상 사건(삭제 상품 포함, APPLIED·offset 진행)을 남긴다.")
     @Test
     void reproducesUnpublishedAndConsumedEvents(CapturedOutput output) throws Exception {
-        // ---- 자식 준비: API 스키마가 먼저 있고, 자식은 자기 두 테이블만 만든다.
+        startStreamerAndAssertReady();
+        warmUpProducer();
+        UnpublishedCase missed = confirmWithFailureBeforeSend(output);
+        ConsumedCase consumed = confirmWithProductDeletedBeforeSend();
+        // A 의 부재도 B 가 끝난 뒤의 고정 구간·DB 로 본다.
+        BrokerObservation broker = awaitConsumedRecordAndOffset(missed.start(), consumed.order());
+        PurchaseObservation purchase = observePurchase(consumed.order());
+        printObservations(missed, consumed, broker, purchase);
+        assertAll(
+            () -> assertUnpublished(output, missed, broker),
+            () -> assertConsumedOnce(output, consumed, broker, purchase)
+        );
+    }
+
+    /** A 처리 직후의 관찰. 고정 구간의 시작 offset 도 여기서 정한다. */
+    private record UnpublishedCase(Long order, Map<TopicPartition, Long> start, ResponseEntity<JsonNode> response,
+                                   double sendsBefore, double sendsAfter, Map<String, Object> facts) {
+    }
+
+    private record ConsumedCase(Long order, Long deletedProduct, ResponseEntity<JsonNode> response) {
+    }
+
+    /** [A 시작, B 소비 뒤 끝) 구간 전체와 그중 B 의 record, B 반영 뒤 group 의 committed offset. */
+    private record BrokerObservation(Map<TopicPartition, Long> end, List<ConsumerRecord<String, String>> range,
+                                     ConsumerRecord<String, String> record, Map<TopicPartition, Long> committed) {
+    }
+
+    /** B 반영 뒤 새 조회로 읽은 완료·활동 행과 주문 사실. */
+    private record PurchaseObservation(Map<String, Object> processed, List<List<Object>> activities, List<List<Long>> storedItems,
+                                       Map<String, Object> facts) {
+    }
+
+    /** API 스키마가 먼저 있고, 자식은 자기 두 테이블만 만든 뒤 listener 가 두 partition 을 배정받아야 주문을 시작한다. */
+    private static void startStreamerAndAssertReady() throws IOException {
         Map<String, String> apiTablesBefore = tableCreateTimes();
         assertThat(apiTablesBefore.keySet()).as("자식 기동 전 구매 테이블 없음").doesNotContainAnyElementsOf(PURCHASE_TABLES);
         startStreamer();
@@ -181,44 +216,46 @@ class OrderEventEndToEndIntegrationTest {
                 .contains("Subscribed to topic(s): " + topic)
                 .doesNotContain("demo.internal.topic-v1")
         );
-        warmUpProducer();
+    }
 
-        // ---- A. commit 뒤 send 직전 통제 실패: broker·구매 활동 누락
+    /** A. commit 뒤 send 직전 통제 실패: broker·구매 활동 누락. */
+    private UnpublishedCase confirmWithFailureBeforeSend(CapturedOutput output) {
         Long missed = newOrder("미발행");
         PROBE.failFor(missed);
         pg.enqueuePlan(PgOperation.CREATE, PaymentModel.providerOrderIdOf(missed), ResponsePlan.outcome(CreateOutcome.SUCCESS));
         Map<TopicPartition, Long> start = kafka.endOffsets(topic);
-        double sendsBeforeMissed = sendTotal();
-        ResponseEntity<JsonNode> missedResponse = confirm(missed);
+        double sendsBefore = sendTotal();
+        ResponseEntity<JsonNode> response = confirm(missed);
         await("미발행 사건의 LISTENER_CALL 실패 로그", () -> output.getAll().contains(
             "ORDER_CONFIRMED_SEND_FAILURE eventId=" + eventId(missed) + " orderId=" + missed + " topic=" + topic + " stage=LISTENER_CALL"));
-        double sendsAfterMissed = sendTotal();
-        Map<String, Object> missedFacts = committedFacts(missed);
+        return new UnpublishedCase(missed, start, response, sendsBefore, sendTotal(), committedFacts(missed));
+    }
 
-        // ---- B. 정상 발행: commit 뒤 send 직전에 세운 동안 품목 상품 하나를 기존 삭제 경로로 지운다.
+    /** B. 정상 발행: commit 뒤 send 직전에 세운 동안 품목 상품 하나를 기존 삭제 경로로 지운다. */
+    private ConsumedCase confirmWithProductDeletedBeforeSend() throws Exception {
         Long consumed = newOrder("정상");
-        List<Long> consumedProducts = orderProducts(consumed);
-        Long deletedProduct = consumedProducts.get(0);
+        Long deletedProduct = orderProducts(consumed).get(0);
         PROBE.holdFor(consumed);
         pg.enqueuePlan(PgOperation.CREATE, PaymentModel.providerOrderIdOf(consumed), ResponsePlan.outcome(CreateOutcome.SUCCESS));
         ExecutorService worker = Executors.newSingleThreadExecutor();
-        ResponseEntity<JsonNode> consumedResponse;
         try {
             Future<ResponseEntity<JsonNode>> pending = worker.submit(() -> confirm(consumed));
             assertThat(PROBE.reached.await(30, TimeUnit.SECONDS)).as("정상 사건 commit 뒤 beforeSend 도달").isTrue();
-            Map<String, Object> consumedAtHold = committedFacts(consumed);
+            Map<String, Object> atHold = committedFacts(consumed);
             api.getBean(ProductFacade.class).delete(deletedProduct);
             assertThat(fresh.queryForObject("SELECT deleted_at IS NOT NULL FROM product WHERE id = ?", Boolean.class, deletedProduct))
                 .as("send 전에 상품 삭제 완료").isTrue();
             PROBE.release();
-            consumedResponse = pending.get(30, TimeUnit.SECONDS);
-            assertCommittedConfirmation(consumedAtHold);
+            ResponseEntity<JsonNode> response = pending.get(30, TimeUnit.SECONDS);
+            assertCommittedConfirmation(atHold);
+            return new ConsumedCase(consumed, deletedProduct, response);
         } finally {
             worker.shutdownNow();
         }
+    }
 
-        // ---- broker·streamer·DB 관찰
-        String applied = "ORDER_ACTIVITY_HANDLED_AND_ACK_RETURNED topic=" + topic;
+    /** streamer 의 APPLIED 뒤 끝 offset 을 고정하고 모든 partition 의 [start, end) 를 끝까지 읽는다. committed offset 은 broker 값을 기다린다. */
+    private static BrokerObservation awaitConsumedRecordAndOffset(Map<TopicPartition, Long> start, Long consumed) {
         await("streamer 의 정상 사건 APPLIED 로그", () -> streamerOutput().contains("eventId=" + eventId(consumed) + " result=APPLIED"));
         Map<TopicPartition, Long> end = kafka.endOffsets(topic);
         List<ConsumerRecord<String, String>> range = kafka.readRange(start, end);
@@ -228,66 +265,85 @@ class OrderEventEndToEndIntegrationTest {
         TopicPartition partition = new TopicPartition(record.topic(), record.partition());
         await("정상 사건 다음 위치까지 broker committed offset 진행",
             () -> Long.valueOf(record.offset() + 1).equals(kafka.committedOffsets(group).get(partition)));
-        Map<TopicPartition, Long> committed = kafka.committedOffsets(group);
-        String childLines = streamerOutput().lines().filter(line -> line.contains("ORDER_ACTIVITY_")).map(String::trim)
-            .collect(Collectors.joining("\n  "));
-        JsonNode value = JSON.readTree(record.value());
+        return new BrokerObservation(end, range, record, kafka.committedOffsets(group));
+    }
+
+    private static PurchaseObservation observePurchase(Long consumed) {
         Map<String, Object> processed = fresh.queryForMap("""
             SELECT event_id, order_id, event_type, schema_version, CAST(confirmed_at AS CHAR) AS confirmed_at, item_count
             FROM processed_order_confirmation WHERE order_id = ?""", consumed);
         List<List<Object>> activities = fresh.query("""
             SELECT product_id, quantity, CAST(confirmed_at AS CHAR) AS confirmed_at FROM product_purchase_activity
             WHERE order_id = ? ORDER BY product_id""", (row, index) -> List.of(row.getLong(1), row.getLong(2), row.getString(3)), consumed);
-        List<List<Long>> storedItems = storedItems(consumed);
-        Map<String, Object> consumedFacts = committedFacts(consumed);
+        return new PurchaseObservation(processed, activities, storedItems(consumed), committedFacts(consumed));
+    }
 
-        System.out.println("[C10 A MISSED] order=" + missed + " providerOrderId=" + PaymentModel.providerOrderIdOf(missed)
-            + " transactionKey=" + transactionKey(missed) + " eventId=" + eventId(missed) + " items=" + storedItems(missed)
-            + " facts=" + missedFacts + " response=" + missedResponse.getStatusCode().value() + "/" + status(missedResponse)
-            + " sendTotal=" + sendsBeforeMissed + "->" + sendsAfterMissed + " probeFailures=" + PROBE.failures.get());
-        System.out.println("[C10 B CONSUMED] order=" + consumed + " providerOrderId=" + PaymentModel.providerOrderIdOf(consumed)
-            + " transactionKey=" + transactionKey(consumed) + " eventId=" + eventId(consumed) + " items=" + storedItems
-            + " deletedProduct=" + deletedProduct + " facts=" + consumedFacts + " response=" + consumedResponse.getStatusCode().value()
-            + "/" + status(consumedResponse));
-        System.out.println("[C10 BROKER] start=" + start + " end=" + end + " recordsInRange=" + range.size()
+    private static void printObservations(UnpublishedCase missed, ConsumedCase consumed, BrokerObservation broker,
+                                          PurchaseObservation purchase) {
+        ConsumerRecord<String, String> record = broker.record();
+        String childLines = streamerOutput().lines().filter(line -> line.contains("ORDER_ACTIVITY_")).map(String::trim)
+            .collect(Collectors.joining("\n  "));
+        System.out.println("[C10 A MISSED] order=" + missed.order() + " providerOrderId=" + PaymentModel.providerOrderIdOf(missed.order())
+            + " transactionKey=" + transactionKey(missed.order()) + " eventId=" + eventId(missed.order()) + " items=" + storedItems(missed.order())
+            + " facts=" + missed.facts() + " response=" + missed.response().getStatusCode().value() + "/" + status(missed.response())
+            + " sendTotal=" + missed.sendsBefore() + "->" + missed.sendsAfter() + " probeFailures=" + PROBE.failures.get());
+        System.out.println("[C10 B CONSUMED] order=" + consumed.order() + " providerOrderId=" + PaymentModel.providerOrderIdOf(consumed.order())
+            + " transactionKey=" + transactionKey(consumed.order()) + " eventId=" + eventId(consumed.order()) + " items=" + purchase.storedItems()
+            + " deletedProduct=" + consumed.deletedProduct() + " facts=" + purchase.facts() + " response="
+            + consumed.response().getStatusCode().value() + "/" + status(consumed.response()));
+        System.out.println("[C10 BROKER] start=" + missed.start() + " end=" + broker.end() + " recordsInRange=" + broker.range().size()
             + " record=" + record.topic() + "/" + record.partition() + "@" + record.offset() + " key=" + record.key() + " value=" + record.value());
-        System.out.println("[C10 STREAMER] committed=" + committed + " processed=" + processed + " activities=" + activities
-            + "\n  " + childLines);
+        System.out.println("[C10 STREAMER] committed=" + broker.committed() + " processed=" + purchase.processed()
+            + " activities=" + purchase.activities() + "\n  " + childLines);
+    }
 
+    /** A: 확정·결제·예약은 남고 send 는 없으며, 고정 구간의 모든 partition 과 구매 테이블에 이 사건이 없다. */
+    private static void assertUnpublished(CapturedOutput output, UnpublishedCase missed, BrokerObservation broker) {
+        Long order = missed.order();
         assertAll(
-            // A
-            () -> assertThat(missedResponse.getStatusCode().value()).isEqualTo(200),
-            () -> assertThat(status(missedResponse)).isEqualTo("CONFIRMED"),
-            () -> assertCommittedConfirmation(missedFacts),
+            () -> assertThat(missed.response().getStatusCode().value()).isEqualTo(200),
+            () -> assertThat(status(missed.response())).isEqualTo("CONFIRMED"),
+            () -> assertCommittedConfirmation(missed.facts()),
             () -> assertThat(PROBE.failures.get()).as("대상 주문에만 통제 실패 1회").isEqualTo(1),
-            () -> assertThat(sendsAfterMissed).as("adapter send 없음(producer record-send-total 불변)").isEqualTo(sendsBeforeMissed),
-            () -> assertThat(output.getAll()).doesNotContain("ORDER_CONFIRMED_SEND_SUCCESS eventId=" + eventId(missed) + " "),
-            () -> assertThat(range).as("고정 구간 [start, end) 의 모든 partition").noneMatch(r -> r.key().equals(missed.toString())
-                || r.value().contains("\"" + eventId(missed) + "\"")),
+            () -> assertThat(missed.sendsAfter()).as("adapter send 없음(producer record-send-total 불변)").isEqualTo(missed.sendsBefore()),
+            () -> assertThat(output.getAll()).doesNotContain("ORDER_CONFIRMED_SEND_SUCCESS eventId=" + eventId(order) + " "),
+            () -> assertThat(broker.range()).as("고정 구간 [start, end) 의 모든 partition").noneMatch(r -> r.key().equals(order.toString())
+                || r.value().contains("\"" + eventId(order) + "\"")),
             () -> assertThat(fresh.queryForObject("SELECT COUNT(*) FROM processed_order_confirmation WHERE order_id = ? OR event_id = ?",
-                Long.class, missed, eventId(missed))).isZero(),
-            () -> assertThat(fresh.queryForObject("SELECT COUNT(*) FROM product_purchase_activity WHERE order_id = ?", Long.class, missed))
-                .isZero(),
-            // B
-            () -> assertThat(consumedResponse.getStatusCode().value()).isEqualTo(200),
-            () -> assertThat(status(consumedResponse)).isEqualTo("CONFIRMED"),
-            () -> assertCommittedConfirmation(consumedFacts),
-            () -> assertThat(range).as("구간의 record 는 정상 사건 하나").hasSize(1),
-            () -> assertThat(output.getAll()).contains("ORDER_CONFIRMED_SEND_SUCCESS eventId=" + eventId(consumed) + " orderId=" + consumed
+                Long.class, order, eventId(order))).isZero(),
+            () -> assertThat(fresh.queryForObject("SELECT COUNT(*) FROM product_purchase_activity WHERE order_id = ?", Long.class, order))
+                .isZero()
+        );
+    }
+
+    /** B: 이번 사건의 record·APPLIED·다음 위치 committed offset·완료 1행·모든 활동(삭제 상품 포함)이 저장 품목·시각과 같다. */
+    private static void assertConsumedOnce(CapturedOutput output, ConsumedCase consumed, BrokerObservation broker,
+                                           PurchaseObservation purchase) throws Exception {
+        Long order = consumed.order();
+        ConsumerRecord<String, String> record = broker.record();
+        TopicPartition partition = new TopicPartition(record.topic(), record.partition());
+        JsonNode value = JSON.readTree(record.value());
+        List<List<Long>> storedItems = purchase.storedItems();
+        assertAll(
+            () -> assertThat(consumed.response().getStatusCode().value()).isEqualTo(200),
+            () -> assertThat(status(consumed.response())).isEqualTo("CONFIRMED"),
+            () -> assertCommittedConfirmation(purchase.facts()),
+            () -> assertThat(broker.range()).as("구간의 record 는 정상 사건 하나").hasSize(1),
+            () -> assertThat(output.getAll()).contains("ORDER_CONFIRMED_SEND_SUCCESS eventId=" + eventId(order) + " orderId=" + order
                 + " topic=" + topic + " partition=" + record.partition() + " offset=" + record.offset()),
-            () -> assertThat(value.get("eventId").asText()).isEqualTo(eventId(consumed)),
-            () -> assertThat(value.get("orderId").asLong()).isEqualTo(consumed),
+            () -> assertThat(value.get("eventId").asText()).isEqualTo(eventId(order)),
+            () -> assertThat(value.get("orderId").asLong()).isEqualTo(order),
             () -> assertThat(value.get("confirmedAt").asText()).isEqualTo(CONFIRMED_AT),
             () -> assertThat(itemsOf(value)).isEqualTo(storedItems),
-            () -> assertThat(streamerOutput()).contains(applied + " partition=" + record.partition() + " offset=" + record.offset()
-                + " eventId=" + eventId(consumed) + " result=APPLIED"),
-            () -> assertThat(committed).containsEntry(partition, record.offset() + 1),
-            () -> assertThat(processed).containsAllEntriesOf(Map.of("event_id", eventId(consumed), "event_type", "OrderConfirmed",
+            () -> assertThat(streamerOutput()).contains("ORDER_ACTIVITY_HANDLED_AND_ACK_RETURNED topic=" + topic
+                + " partition=" + record.partition() + " offset=" + record.offset() + " eventId=" + eventId(order) + " result=APPLIED"),
+            () -> assertThat(broker.committed()).containsEntry(partition, record.offset() + 1),
+            () -> assertThat(purchase.processed()).containsAllEntriesOf(Map.of("event_id", eventId(order), "event_type", "OrderConfirmed",
                 "schema_version", 1, "confirmed_at", CONFIRMED_AT_SQL, "item_count", storedItems.size())),
-            () -> assertThat(((Number) processed.get("order_id")).longValue()).isEqualTo(consumed),
-            () -> assertThat(activities).isEqualTo(storedItems.stream()
+            () -> assertThat(((Number) purchase.processed().get("order_id")).longValue()).isEqualTo(order),
+            () -> assertThat(purchase.activities()).isEqualTo(storedItems.stream()
                 .map(item -> List.<Object>of(item.get(0), item.get(1), CONFIRMED_AT_SQL)).toList()),
-            () -> assertThat(activities).extracting(row -> row.get(0)).contains(deletedProduct),
+            () -> assertThat(purchase.activities()).extracting(row -> row.get(0)).contains(consumed.deletedProduct()),
             () -> assertThat(fresh.queryForObject("SELECT COUNT(*) FROM product_purchase_activity", Long.class))
                 .as("구매 활동은 정상 사건 품목뿐").isEqualTo(storedItems.size()),
             () -> assertThat(fresh.queryForObject("SELECT COUNT(*) FROM processed_order_confirmation", Long.class)).isEqualTo(1L),
@@ -504,8 +560,6 @@ class OrderEventEndToEndIntegrationTest {
         USERS.put(order, user);
         return order;
     }
-
-    private static final Map<Long, Long> USERS = new java.util.concurrent.ConcurrentHashMap<>();
 
     private ResponseEntity<JsonNode> confirm(Long order) {
         return exchange(USERS.get(order), "/api/v1/orders/" + order + "/confirm", PgCommands.forOrder(order));

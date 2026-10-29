@@ -18,6 +18,7 @@ import com.loopers.fixture.pg.CreateOutcome;
 import com.loopers.fixture.pg.PgFixtureServer;
 import com.loopers.fixture.pg.PgOperation;
 import com.loopers.fixture.pg.ResponsePlan;
+import com.loopers.infrastructure.order.OrderEventTestCleanup.Step;
 import com.loopers.pgsimulator.PaymentStatus;
 import com.loopers.testsupport.LocalKafkaTestSupport;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -145,51 +146,24 @@ class OrderEventKafkaBrokerIntegrationTest {
     /** 준비가 일부만 됐어도 만든 것만 정리한다. 한 단계가 실패해도 다음 단계를 시도한다. */
     @AfterAll
     static void releaseSharedResources() {
-        runCleanup(List.of(
-            new CleanupStep("PG fixture 종료", () -> {
+        OrderEventTestCleanup.runAll(List.of(
+            new Step("PG fixture 종료", () -> {
                 if (pg != null) {
                     pg.close();
                 }
             }),
-            new CleanupStep("검증 전용 스키마 삭제", () -> {
+            new Step("검증 전용 스키마 삭제", () -> {
                 if (schemaOwned) {
                     try (var root = new SingleConnectionDataSource(server, "root", "test", true)) {
                         new JdbcTemplate(root).execute("DROP DATABASE IF EXISTS " + SCHEMA);
                     }
                 }
             }),
-            new CleanupStep("Kafka 소유 topic·group 정리", () -> {
+            new Step("Kafka 소유 topic·group 정리", () -> {
                 if (kafka != null) {
                     kafka.close();
                 }
             })));
-    }
-
-    record CleanupStep(String name, CleanupAction action) {
-    }
-
-    interface CleanupAction {
-        void run() throws Exception;
-    }
-
-    /** 모든 단계를 순서대로 시도한다. 첫 오류를 던지고 이후 오류는 suppressed 로 붙여, 마지막 오류가 첫 오류를 덮지 않게 한다. */
-    static void runCleanup(List<CleanupStep> steps) {
-        RuntimeException first = null;
-        for (CleanupStep step : steps) {
-            try {
-                step.action().run();
-            } catch (Exception failure) {
-                IllegalStateException wrapped = new IllegalStateException("정리 실패: " + step.name(), failure);
-                if (first == null) {
-                    first = wrapped;
-                } else {
-                    first.addSuppressed(wrapped);
-                }
-            }
-        }
-        if (first != null) {
-            throw first;
-        }
     }
 
     @BeforeEach
