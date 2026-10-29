@@ -28,6 +28,7 @@ dependencies {
     // test-fixtures
     testImplementation(testFixtures(project(":modules:jpa")))
     testImplementation(testFixtures(project(":modules:redis")))
+    testImplementation(testFixtures(project(":modules:kafka")))
 
     // 로컬 PG 앱 (설계 2.10). 테스트가 같은 JVM 에서 시작한다
     testImplementation(project(":apps:pg-simulator"))

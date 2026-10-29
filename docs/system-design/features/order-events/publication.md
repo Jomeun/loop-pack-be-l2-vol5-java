@@ -101,6 +101,8 @@ P2의 발행 포트 호출 시 commit 관찰은 별도 스레드에서 새 readO
 
 부모 테스트 실행은 소유 목록에 등록된 topic/group만 정리한다. 먼저 listener·별도 JVM·직접 consumer를 종료하고 group 비활성을 확인한 뒤 group/topic을 삭제하고 유한 대기 동안 삭제 완료·topic 재생성 없음도 확인한 뒤 AdminClient를 닫는다. Spring 컨텍스트가 캐시돼 있어도 구독 listener를 실제 정지시키고, 재사용 전 다음 시나리오 topic을 먼저 준비한다. 부분 준비 실패에도 동일하게 정리하고 오류를 보고한다. 공유 Docker Kafka를 중지하거나 볼륨·기존 topic을 지우지 않는다. 환경은 공유하지만 이름·offset·소비 member는 실행별로 격리하며, DB를 공유하는 시나리오는 소비 문서의 순차 실행/초기화 조건도 따른다.
 
+P4·P6~P8 broker 검증은 커머스 앱을 직접 create/validate로 기동·재기동하므로 기존 테스트 데이터와 섞이지 않도록 기존 MySQL 테스트 컨테이너 안의 임시 스키마 `order_event_kafka`를 사용하고 검증 종료 시 삭제한다(2026-10-29 사용자 승인). 정리는 PG fixture·스키마·Kafka 소유 자원을 각각 시도하고 첫 오류와 추가 오류를 함께 보존한다. 이 허용은 발행 검증에만 해당하며 streamer·C10의 별도 스키마 허용으로 확대하지 않는다. 전용 producer의 IO 스레드 확인은 해당 테스트 컨텍스트에만 부여한 고유 `client.id`로 식별하며 production 기본 client ID는 바꾸지 않는다.
+
 HTTP는 기존 `server.shutdown=graceful`, `spring.lifecycle.timeout-per-shutdown-phase=30s`를 명시한다. 전용 singleton·비트랜잭션 producer의 physical close 대기는 15초다. HTTP 진행 요청의 사건 등록·send가 끝난 뒤 factory가 종료되는 실제 lifecycle 순서를 확인한다. Spring Kafka 3.3.4 소스의 factory phase는 `Integer.MIN_VALUE`, stop은 destroy로 연결되지만 실제 bean 의존성과 종료 로그 검증을 대신하지 않는다.
 
 정상 실행의 전달 예산 30초를 종료 때 끝까지 주겠다는 계약이 아니다. close가 시작되면 15초 대기 후 미완료 record가 실패할 수 있으며, 그 결과를 관측 가능한 범위에서 로그로 남긴다. phase 대기는 동기 stop을 강제로 중단하는 전역 deadline이 아니고, phase 30초와 close 15초를 더해 앱 전체 45초 종료 보장으로 쓰지 않는다. 별도 flush·종료 executor·진행 이벤트 영속화는 추가하지 않는다. OS 강제 종료·전원 장애에는 callback 로그도 남지 않을 수 있다.
