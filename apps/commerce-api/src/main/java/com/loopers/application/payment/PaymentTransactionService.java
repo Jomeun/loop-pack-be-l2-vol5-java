@@ -1,6 +1,7 @@
 package com.loopers.application.payment;
 
 import com.loopers.application.order.OrderInfo;
+import com.loopers.domain.order.OrderConfirmed;
 import com.loopers.domain.order.OrderItemModel;
 import com.loopers.domain.order.OrderModel;
 import com.loopers.domain.order.OrderRepository;
@@ -26,6 +27,7 @@ import com.loopers.support.error.ErrorType;
 import com.loopers.support.transaction.AfterCommitRunner;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -63,6 +65,7 @@ public class PaymentTransactionService {
     private final AfterCommitRunner afterCommitRunner;
     private final PaymentTransactionProbe probe;
     private final Clock orderConfirmationClock;
+    private final ApplicationEventPublisher eventPublisher;
     private final String providerAccount;
 
     public PaymentTransactionService(OrderRepository orderRepository, PaymentRepository paymentRepository,
@@ -71,6 +74,7 @@ public class PaymentTransactionService {
                                      ProductDetailCache productDetailCache, AfterCommitRunner afterCommitRunner,
                                      PaymentTransactionProbe probe,
                                      @Qualifier("orderConfirmationClock") Clock orderConfirmationClock,
+                                     ApplicationEventPublisher eventPublisher,
                                      @Value("${commerce.pg.account-id}") String providerAccount) {
         this.orderRepository = orderRepository;
         this.paymentRepository = paymentRepository;
@@ -81,6 +85,7 @@ public class PaymentTransactionService {
         this.afterCommitRunner = afterCommitRunner;
         this.probe = probe;
         this.orderConfirmationClock = orderConfirmationClock;
+        this.eventPublisher = eventPublisher;
         this.providerAccount = providerAccount;
     }
 
@@ -189,9 +194,11 @@ public class PaymentTransactionService {
         PaymentModel payment = loadTokenPayment(order, token);
         ObservationDecision decision = payment.recordObservation(token, observation, ZonedDateTime.now());
 
+        OrderConfirmed confirmed = null;
         PaymentApplyResult.Outcome outcome = switch (decision.effect()) {
             case CONFIRM -> {
                 order.confirmPg(payment.getAmount(), confirmationTime());
+                confirmed = OrderConfirmed.from(order);
                 yield PaymentApplyResult.Outcome.FINAL;
             }
             case RELEASE -> {
@@ -209,6 +216,10 @@ public class PaymentTransactionService {
         };
         orderRepository.save(order);
         paymentRepository.save(payment);
+        if (confirmed != null) {
+            // 사건을 TX 안에 등록할 뿐 전송이 아니다. commit 전에 실패해 rollback 되면 listener 는 실행되지 않는다.
+            eventPublisher.publishEvent(confirmed);
+        }
         reachBeforeCommit("applyObservation", order.getId());
         return new PaymentApplyResult(OrderInfo.from(order, payment), outcome);
     }

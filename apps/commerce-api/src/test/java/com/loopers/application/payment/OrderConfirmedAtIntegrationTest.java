@@ -1,6 +1,7 @@
 package com.loopers.application.payment;
 
 import com.loopers.config.OrderEventKafkaConfig;
+import com.loopers.domain.order.OrderEventPublisher;
 import com.loopers.domain.order.OrderModel;
 import com.loopers.domain.payment.ObservationSource;
 import com.loopers.domain.payment.PaymentCheckToken;
@@ -13,6 +14,7 @@ import com.loopers.infrastructure.order.OrderJpaRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import com.loopers.support.persistence.ConstraintViolationClassifier;
+import com.loopers.testsupport.RecordingOrderEventPublisher;
 import com.loopers.utils.DatabaseCleanUp;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -59,6 +61,9 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 @Import(PaymentTxTestConfig.class)
 @DisplayName("결제 TX 서비스는 최초 PG 확정 시각을 UTC 마이크로초로 한 번만 저장한다.")
 class OrderConfirmedAtIntegrationTest {
+
+    @TestBean(name = "kafkaOrderEventPublisher", methodName = RecordingOrderEventPublisher.FACTORY, enforceOverride = true)
+    private OrderEventPublisher orderEventPublisher;
 
     private static final Long USER = 1L;
     private static final Duration WAIT = Duration.ofSeconds(10);
