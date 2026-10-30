@@ -14,6 +14,7 @@
 |`71d9a79`|소비 C1~C5 모델·파서·단일 DB TX·중복/충돌|
 |`bfa9830`|C6~C9 listener·실제 전달·실패 복구·재전달·partition 배정|
 |`631b3c5`|C10 실제 PG 종단·demo 비활성화·bootJar 입력 추적|
+|`7daea9c`|C10 테스트 단계 분리·broker/C10 공통 정리 helper 분리. 제품 코드·검증 의미는 바꾸지 않음|
 
 각 구현의 검증은 커밋 전 작업 트리에서 실행했다. 예를 들어 C10 전체 회귀는 `bfa9830`에 C10 변경을 더한 상태, Gradle 보완 검증은 여기에 입력 선언을 더한 상태이며 최종 구현이 `631b3c5`에 보존됐다. 이미 커밋된 revision을 새로 checkout해 실행한 결과로 표현하지 않는다.
 
@@ -58,7 +59,7 @@ Gradle이 UP-TO-DATE·FROM-CACHE로 건너뛴 작업을 새로운 실행 통과�
 |P5|`OrderEventKafkaConfigTest`, `OrderEventKafkaContextTest`, `OrderConfirmedSendFailureIntegrationTest`|전용 비트랜잭션 설정·send 호출/Future 오류와 주문 확정 유지. 오류 단위 검증의 template 대역과 실제 broker 검증은 별개|
 |P6|`OrderEventKafkaBrokerIntegrationTest`|즉시 성공·callback·reconcile 실제 발행, 반복 적용 후 새 record 없음|
 |P7|같은 broker 테스트와 `OrderEventEndToEndIntegrationTest`|commit→send 공백, 두 partition의 고정 구간과 새 DB 조회|
-|P8|`OrderEventKafkaBrokerIntegrationTest`, `OrderEventKafkaBrokerCleanupTest`|실제 정상 종료·close 예산 소진, 정리 runner의 부분 실패 단위 검증|
+|P8|`OrderEventKafkaBrokerIntegrationTest`, `OrderEventKafkaBrokerCleanupTest`|실제 정상 종료·close 예산 소진, 정리 runner(`OrderEventTestCleanup`)의 부분 실패 단위 검증|
 |P9|API 전체 check|기존 계약 회귀·Checkstyle·ArchUnit. fake는 실제 최초 PG 확정 경로에 명시 적용, 전역 guard·공통 부모 제거|
 |C1|`OrderConfirmedParserTest`, `OrderConfirmationTest`|엄격 UTF-8·JSON 타입·중복 필드·trailing token·ID·시각·양수·overflow·같은 사실 정규화|
 |C2·C3|`PurchaseActivitySchemaIntegrationTest`, `PurchaseActivityHandlerIntegrationTest`|실제 DDL·유일/CHECK·정상 효과·동일 사실 no-op·충돌·저장 손상 우선 검사|
@@ -182,10 +183,11 @@ API test는 streamer bootJar 준비에 의존하고 실제 산출물 경로를 �
 |C6~C9 테스트 보완|실제 broker 통합 3건|Checkstyle test 오류 0. 전체 컬럼 비교·연도 의존 제거|
 |C10 전체 회귀(Gradle 입력 보완 전)|API check 855건·streamer check 88건|API Checkstyle main166/test133·ArchUnit 3, streamer main22/test15·ArchUnit 1, 모두 오류 0. 당시 Codex가 XML 직접 확인|
 |Gradle 입력 보완 후|C10 1건, jar 내용 변경 확인 후 다시 1건|실제 실행 2회 각각 통과. 사이의 UP-TO-DATE 실행은 통과 수에 포함하지 않음|
+|테스트 리팩터링(`7daea9c`) 후|API broker 4·cleanup 2·C10 1, 총 7건|같은 변경 뒤 실행한 Checkstyle test 134개 파일 오류 0. 전체 check 재실행은 아님|
 
 `modules:kafka:check`는 test 소스가 없어 NO-SOURCE이며 testFixtures 컴파일 등 수행 결과다. Kafka 모듈 테스트가 별도로 통과했다고 세지 않는다. C10의 API check에는 PG fixture·POINT·소유권·예약 등 API 회귀가 포함되며 pg-simulator 앱 자체 check를 이번에 새로 실행한 결과는 아니다.
 
-현재 API 결과 폴더에는 필터 재실행의 C10 XML 1개(1건)만 남아 있고, 이전 전체 회귀 213개 XML(855건)은 대체됐다. 그 전체 통과는 당시 Codex 직접 확인 기록을 보존한 과거 결과이며 현재 파일로 다시 합산할 수 있다고 하지 않는다. streamer 결과는 16개 XML·88건이 남아 있고 이번 문서 작업에서 합계를 확인했다. 이번 문서 작업은 새 회귀 실행이 아니다.
+현재 API 결과 폴더에는 테스트 리팩터링 뒤 관련 필터 실행의 XML 3개(broker 4·cleanup 2·C10 1, 총 7건)만 남아 있고, 이전 전체 회귀 213개 XML(855건)과 그 뒤 C10 단독 결과는 대체됐다. 그 전체 통과는 당시 Codex 직접 확인 기록을 보존한 과거 결과이며 현재 파일로 다시 합산할 수 있다고 하지 않는다. streamer 결과는 16개 XML·88건이 남아 있고 이번 문서 작업에서 합계를 확인했다. 이번 문서 작업은 새 회귀 실행이 아니다.
 
 ## 남은 한계
 
